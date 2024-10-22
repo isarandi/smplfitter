@@ -1,11 +1,14 @@
 import torch
+import vtkmodules.vtkCommonCore
 
 from smplfit.pytorch.lstsq import lstsq, lstsq_partial_share
 from smplfit.pytorch.rotation import kabsch, mat2rotvec
 
 
 class Fitter:
-    def __init__(self, body_model, num_betas, enable_kid=False, vertex_subset=None):
+    def __init__(
+            self, body_model, num_betas, enable_kid=False, vertex_subset=None,
+            joint_regressor=None):
         self.body_model = body_model
         self.n_betas = num_betas
         self.enable_kid = enable_kid
@@ -44,7 +47,10 @@ class Fitter:
         self.weights = body_model.weights.index_select(0, self.vertex_subset)
         self.posedirs = body_model.posedirs.index_select(0, self.vertex_subset)
         self.num_vertices = self.v_template.shape[0]
-
+        if joint_regressor is not None:
+            self.J_regressor = joint_regressor
+        else:
+            self.J_regressor = body_model.J_regressor
 
     def fit(self, to_fit, n_iter=1, l2_regularizer=5e-6, l2_regularizer2=0,
             initial_vertices=None, joints_to_fit=None,
@@ -102,9 +108,11 @@ class Fitter:
             if scale_fit:
                 factor = result['scale_corr'][:, None, None]
                 glob_rots = self.fit_global_rotations_dependent(
-                    glob_rots, to_fit, factor * result['vertices'] + (1 - factor) * result['trans'].unsqueeze(-2),
+                    glob_rots, to_fit,
+                    factor * result['vertices'] + (1 - factor) * result['trans'].unsqueeze(-2),
                     result['shape_betas'], result['kid_factor'], result['trans'],
-                    joints_to_fit, factor * result['joints'] + (1 - factor) * result['trans'].unsqueeze(-2),
+                    joints_to_fit,
+                    factor * result['joints'] + (1 - factor) * result['trans'].unsqueeze(-2),
                     vertex_weights=vertex_weights, joint_weights=joint_weights)
             else:
                 glob_rots = self.fit_global_rotations_dependent(
@@ -280,8 +288,8 @@ class Fitter:
         joint_weight = 1 - mesh_weight
 
         if target_joints is None or reference_joints is None:
-            target_joints = self.body_model.J_regressor @ target
-            reference_joints = self.body_model.J_regressor @ reference
+            target_joints = self.J_regressor @ target
+            reference_joints = self.J_regressor @ reference
 
         part_assignment = torch.argmax(self.weights, dim=1)
         # Disable the rotation of toes separately from the feet
@@ -336,8 +344,8 @@ class Fitter:
         glob_rots = []
 
         if target_joints is None or reference_joints is None:
-            target_joints = self.body_model.J_regressor @ target
-            reference_joints = self.body_model.J_regressor @ reference
+            target_joints = self.J_regressor @ target
+            reference_joints = self.J_regressor @ reference
 
         device = self.body_model.v_template.device
         part_assignment = torch.argmax(self.weights, dim=1)
