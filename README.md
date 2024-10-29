@@ -5,7 +5,7 @@
 This repository contains code for efficiently fitting parametric SMPL/SMPL+H/SMPL-X human body models to nonparametric 3D vertex and joint locations. The input needs to be in correspondence with the body template - this code does not handle unordered input point clouds.
 
 Example use cases:
-* You extracted nonparametric vertex and joint estimates from an RGB image, e.g. using NLF, and want to express this estimate in parametric form, for example to feed it to another model that expects body model parameters.
+* You extracted nonparametric vertex and joint estimates from an RGB image, e.g. using [Neural Localizer Fields (NLF)](https://virtualhumans.mpi-inf.mpg.de/nlf), and want to express this estimate in parametric form, for example to feed it to another model that expects body model parameters.
 * You want to convert between body models. For example, you have SMPL parameters from some dataset but need SMPL-X parameters as input to some pretrained model (or vice versa).
 
 We provide the implementation in **PyTorch, TensorFlow and NumPy**. 
@@ -99,7 +99,7 @@ SMPLBodyModel(-X/+H) is a parametric body model that takes body part orientation
 
 Our algorithm alternates between fitting orientations and fitting shape. A good result can be obtained already with 1-3 iterations.
 
-We illustrate the steps with the following example. Given the depicted RGB image, we used NLF to obtain nonparametric vertex and joint locations as follows:
+We illustrate the steps with the following example. Given the depicted RGB image, we used [Neural Localizer Fields (NLF)](https://virtualhumans.mpi-inf.mpg.de/nlf) to obtain nonparametric vertex and joint locations as follows:
 
 <img src="docs/source/_static/figures/image.png" alt="on_image" width="300"/>
 <img src="docs/source/_static/figures/on_image.png" alt="on_image" width="300"/>
