@@ -1,5 +1,7 @@
 # SMPLfit
 
+<img src="figures/example.gif" alt="on_image" width="500"/>
+
 This repository contains code for efficiently fitting parametric SMPL/SMPL+H/SMPL-X human body models to nonparametric 3D vertex and joint locations. The input needs to be in correspondence with the body template - this code does not handle unordered input point clouds.
 
 Example use cases:
@@ -10,7 +12,6 @@ We provide the implementation in **PyTorch, TensorFlow and NumPy**.
 
 The algorithm is **fast**, optimized for **batch** processing, can run on the **GPU** and is **differentiable**. It can fit a batch of 4096 instances in 423 ms on a single RTX 3090 GPU giving a throughput of **9481 fits per second**. At the small batch size regime (batch size 32), the throughput is still 1839 fits/second. When using a subset of 1024 vertices (which still allows high-quality fits), one can fit a batch of 16382 instances in 440 ms. For 25 fps videos, this means you can fit SMPL params to every frame of 10 minutes of nonparametric motion data in less than half a second.
 
-<img src="figures/example.gif" alt="on_image" width="300"/>
 
 ## Setup
 
