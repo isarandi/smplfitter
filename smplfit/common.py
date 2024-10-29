@@ -1,11 +1,12 @@
 import os.path as osp
 import pickle
 
-import addict
 import numpy as np
 import os
 import warnings
 import sys
+
+import contextlib
 
 
 def initialize(model_root, model_name, gender, model_type='basic'):
@@ -32,64 +33,68 @@ def initialize(model_root, model_name, gender, model_type='basic'):
         else:
             raise ValueError(f'Unknown model name: {model_name}')
 
-    res = addict.Dict()
-    res.shapedirs = np.array(smpl_data['shapedirs'], dtype=np.float64)
-    res.posedirs = np.array(smpl_data['posedirs'], dtype=np.float64)
-    res.v_template = np.array(smpl_data['v_template'], dtype=np.float64)
+    res = {}
+    res['shapedirs'] = np.array(smpl_data['shapedirs'], dtype=np.float64)
+    res['posedirs'] = np.array(smpl_data['posedirs'], dtype=np.float64)
+    res['v_template'] = np.array(smpl_data['v_template'], dtype=np.float64)
+
     if not isinstance(smpl_data['J_regressor'], np.ndarray):
-        res.J_regressor = np.array(smpl_data['J_regressor'].toarray(), dtype=np.float64)
+        res['J_regressor'] = np.array(smpl_data['J_regressor'].toarray(), dtype=np.float64)
     else:
-        res.J_regressor = smpl_data['J_regressor'].astype(np.float64)
-    res.weights = np.array(smpl_data['weights'])
-    res.faces = np.array(smpl_data['f'].astype(np.int32))
+        res['J_regressor'] = smpl_data['J_regressor'].astype(np.float64)
 
-    res.kintree_parents = smpl_data['kintree_table'][0].tolist()
-    res.num_joints = len(res.kintree_parents)
-    res.num_vertices = len(res.v_template)
+    res['weights'] = np.array(smpl_data['weights'])
+    res['faces'] = np.array(smpl_data['f'].astype(np.int32))
+    res['kintree_parents'] = smpl_data['kintree_table'][0].tolist()
+    res['num_joints'] = len(res['kintree_parents'])
+    res['num_vertices'] = len(res['v_template'])
 
-    # Kid model has an additional shape parameter which pulls the mesh towards
-    # the SMIL mean template
-    v_template_smil = np.load(os.path.join(model_root, f'kid_template.npy')).astype(np.float64)
-    res.kid_shapedir = v_template_smil - np.mean(v_template_smil, axis=0) - res.v_template
-    res.kid_J_shapedir = res.J_regressor @ res.kid_shapedir
+    # Kid model has an additional shape parameter which pulls the mesh towards the SMIL mean
+    # template
+    v_template_smil = np.load(os.path.join(model_root, 'kid_template.npy')).astype(np.float64)
+    res['kid_shapedir'] = v_template_smil - np.mean(v_template_smil, axis=0) - res['v_template']
+    res['kid_J_shapedir'] = res['J_regressor'] @ res['kid_shapedir']
 
     if 'J_shapedirs' in smpl_data:
-        res.J_shapedirs = np.array(smpl_data['J_shapedirs'], dtype=np.float64)
+        res['J_shapedirs'] = np.array(smpl_data['J_shapedirs'], dtype=np.float64)
     else:
-        res.J_shapedirs = np.einsum('jv,vcs->jcs', res.J_regressor, res.shapedirs)
+        res['J_shapedirs'] = np.einsum(
+            'jv,vcs->jcs', res['J_regressor'], res['shapedirs'])
 
     if 'J_template' in smpl_data:
-        res.J_template = np.array(smpl_data['J_template'], dtype=np.float64)
+        res['J_template'] = np.array(smpl_data['J_template'], dtype=np.float64)
     else:
-        res.J_template = res.J_regressor @ res.v_template
+        res['J_template'] = res['J_regressor'] @ res['v_template']
 
-    res.v_dirs = np.concatenate([res.shapedirs, res.posedirs], axis=2)
-    res.v_template = res.v_template - np.einsum('vcx,x->vc', res.posedirs, np.reshape(
-        np.tile(np.eye(3, dtype=np.float64), [res.num_joints - 1, 1]), [-1]))
-
-    tensors = addict.Dict(
-        v_template=res.v_template,
-        shapedirs=res.shapedirs,
-        posedirs=res.posedirs,
-        v_dirs=res.v_dirs,
-        J_regressor=res.J_regressor,
-        J_template=res.J_template,
-        J_shapedirs=res.J_shapedirs,
-        kid_shapedir=res.kid_shapedir,
-        kid_J_shapedir=res.kid_J_shapedir,
-        weights=res.weights,
+    res['v_dirs'] = np.concatenate([res['shapedirs'], res['posedirs']], axis=2)
+    res['v_template'] = res['v_template'] - np.einsum(
+        'vcx,x->vc', res['posedirs'],
+        np.reshape(np.tile(np.eye(3, dtype=np.float64), [res['num_joints'] - 1, 1]), [-1])
     )
 
-    nontensors = addict.Dict(
-        kintree_parents=res.kintree_parents,
-        faces=res.faces,
-        num_joints=res.num_joints,
-        num_vertices=res.num_vertices
-    )
+    tensors = {
+        'v_template': res['v_template'],
+        'shapedirs': res['shapedirs'],
+        'posedirs': res['posedirs'],
+        'v_dirs': res['v_dirs'],
+        'J_regressor': res['J_regressor'],
+        'J_template': res['J_template'],
+        'J_shapedirs': res['J_shapedirs'],
+        'kid_shapedir': res['kid_shapedir'],
+        'kid_J_shapedir': res['kid_J_shapedir'],
+        'weights': res['weights'],
+    }
+
+    nontensors = {
+        'kintree_parents': res['kintree_parents'],
+        'faces': res['faces'],
+        'num_joints': res['num_joints'],
+        'num_vertices': res['num_vertices']
+    }
+
     return tensors, nontensors
 
 
-import contextlib
 
 
 @contextlib.contextmanager
@@ -122,4 +127,3 @@ def monkey_patched_for_chumpy():
 
     if added_getargspec:
         del inspect.getargspec
-

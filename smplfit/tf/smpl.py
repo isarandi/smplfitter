@@ -17,20 +17,20 @@ class SMPL:
         self.model_name = model_name
         tensors, nontensors = smplfit.common.initialize(
             model_root, model_name, gender, model_type)
-        self.v_template = tf.constant(tensors.v_template, tf.float32)
-        self.shapedirs = tf.constant(tensors.shapedirs, tf.float32)
-        self.posedirs = tf.constant(tensors.posedirs, tf.float32)
-        self.v_dirs = tf.constant(tensors.v_dirs, tf.float32)
-        self.J_regressor = tf.constant(tensors.J_regressor, tf.float32)
-        self.J_template = tf.constant(tensors.J_template, tf.float32)
-        self.J_shapedirs = tf.constant(tensors.J_shapedirs, tf.float32)
-        self.kid_shapedir = tf.constant(tensors.kid_shapedir, tf.float32)
-        self.kid_J_shapedir = tf.constant(tensors.kid_J_shapedir, tf.float32)
-        self.weights = tf.constant(tensors.weights, tf.float32)
-        self.kintree_parents = nontensors.kintree_parents
-        self.faces = nontensors.faces
-        self.num_joints = nontensors.num_joints
-        self.num_vertices = nontensors.num_vertices
+        self.v_template = tf.constant(tensors['v_template'], tf.float32)
+        self.shapedirs = tf.constant(tensors['shapedirs'], tf.float32)
+        self.posedirs = tf.constant(tensors['posedirs'], tf.float32)
+        self.v_dirs = tf.constant(tensors['v_dirs'], tf.float32)
+        self.J_regressor = tf.constant(tensors['J_regressor'], tf.float32)
+        self.J_template = tf.constant(tensors['J_template'], tf.float32)
+        self.J_shapedirs = tf.constant(tensors['J_shapedirs'], tf.float32)
+        self.kid_shapedir = tf.constant(tensors['kid_shapedir'], tf.float32)
+        self.kid_J_shapedir = tf.constant(tensors['kid_J_shapedir'], tf.float32)
+        self.weights = tf.constant(tensors['weights'], tf.float32)
+        self.kintree_parents = nontensors['kintree_parents']
+        self.faces = nontensors['faces']
+        self.num_joints = nontensors['num_joints']
+        self.num_vertices = nontensors['num_vertices']
 
     def __call__(
             self, pose_rotvecs=None, shape_betas=None, trans=None, kid_factor=None,

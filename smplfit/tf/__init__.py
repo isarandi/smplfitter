@@ -19,7 +19,7 @@ def get_body_model(model_name, gender, model_root=None):
 @functools.lru_cache()
 def get_cached_fit_fn(
         body_model_name='smpl', gender='neutral', num_betas=10, enable_kid=False,
-        requested_keys=('pose_rotvecs', 'trans', 'shape_betas', 'latents', 'joints'),
+        requested_keys=('pose_rotvecs', 'trans', 'shape_betas', 'joints'),
         l2_regularizer=1, l2_regularizer2=0, num_iter=3, vertex_subset=None, share_beta=False,
         final_adjust_rots=True, weighted=False, scale_target=False, scale_fit=False,
         scale_regularizer=0, kid_regularizer=None):
@@ -31,13 +31,13 @@ def get_cached_fit_fn(
 
 def get_fit_fn(
         body_model_name='smpl', gender='neutral', num_betas=10, enable_kid=False,
-        requested_keys=('pose_rotvecs', 'trans', 'shape_betas', 'latents', 'joints'),
+        requested_keys=('pose_rotvecs', 'trans', 'shape_betas', 'joints'),
         l2_regularizer=1, l2_regularizer2=0, num_iter=3, vertex_subset=None, share_beta=False,
         final_adjust_rots=True, weighted=False, scale_target=False, scale_fit=False,
         scale_regularizer=0, kid_regularizer=None):
     from smplfit.tf import fitting
     body_model = get_cached_body_model(body_model_name, gender)
-    fitter = fitting.Fitter(
+    fitter = fitting.SMPLfit(
         body_model, num_betas=num_betas, enable_kid=enable_kid, vertex_subset=vertex_subset)
 
     if weighted:
@@ -49,12 +49,13 @@ def get_fit_fn(
                 tf.TensorSpec([None, body_model.num_joints], tf.float32),
             ])
         def fit_fn(verts, joints, vertex_weights, joint_weights):
-            res = fitter.fit(
-                verts, num_iter, l2_regularizer=l2_regularizer, l2_regularizer2=l2_regularizer2,
-                joints_to_fit=joints, requested_keys=requested_keys, share_beta=share_beta,
-                final_adjust_rots=final_adjust_rots, vertex_weights=vertex_weights,
-                joint_weights=joint_weights, scale_target=scale_target, scale_fit=scale_fit,
-                scale_regularizer=scale_regularizer, kid_regularizer=kid_regularizer)
+            res = fitter.fit(verts, target_joints=joints, vertex_weights=vertex_weights,
+                             joint_weights=joint_weights, n_iter=num_iter,
+                             beta_regularizer=l2_regularizer, beta_regularizer2=l2_regularizer2,
+                             scale_regularizer=scale_regularizer, kid_regularizer=kid_regularizer,
+                             share_beta=share_beta, final_adjust_rots=final_adjust_rots,
+                             scale_target=scale_target, scale_fit=scale_fit,
+                             requested_keys=requested_keys)
             return {k: v for k, v in res.items() if v is not None}
 
         def wrapped(verts, joints, vertex_weights, joint_weights):
@@ -79,11 +80,12 @@ def get_fit_fn(
                 tf.TensorSpec([None, body_model.num_joints, 3], tf.float32),
             ])
         def fit_fn(verts, joints):
-            res = fitter.fit(
-                verts, num_iter, l2_regularizer=l2_regularizer, l2_regularizer2=l2_regularizer2,
-                joints_to_fit=joints, requested_keys=requested_keys, share_beta=share_beta,
-                final_adjust_rots=final_adjust_rots, scale_target=scale_target, scale_fit=scale_fit,
-                scale_regularizer=scale_regularizer, kid_regularizer=kid_regularizer)
+            res = fitter.fit(verts, target_joints=joints, n_iter=num_iter,
+                             beta_regularizer=l2_regularizer, beta_regularizer2=l2_regularizer2,
+                             scale_regularizer=scale_regularizer, kid_regularizer=kid_regularizer,
+                             share_beta=share_beta, final_adjust_rots=final_adjust_rots,
+                             scale_target=scale_target, scale_fit=scale_fit,
+                             requested_keys=requested_keys)
             return {k: v for k, v in res.items() if v is not None}
 
         def wrapped(verts, joints):

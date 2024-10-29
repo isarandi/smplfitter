@@ -11,9 +11,8 @@ setup(
     python_requires='>=3.6',
     install_requires=[
         'numpy',
-        'addict',
         'scipy',
-#        'chumpy',
+#        'chumpy', # only for SMPL+H
     ],
     extras_require={
         'tensorflow': ['tensorflow'],

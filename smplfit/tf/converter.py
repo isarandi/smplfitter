@@ -87,148 +87,120 @@ class Converter(tf.Module):
 
         if body_model_out == 'smpl':
             if gender_out == 'female':
-                fit = smplfit.tf.full_fitting.Fitter(self.smpl_female,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smpl_female,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             elif gender_out == 'male':
-                fit = smplfit.tf.full_fitting.Fitter(self.smpl_male,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smpl_male,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             else:
-                fit = smplfit.tf.full_fitting.Fitter(self.smpl_neutral,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smpl_neutral,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
         elif body_model_out == 'smplx':
             if gender_out == 'female':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplx_female,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplx_female,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             elif gender_out == 'male':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplx_male,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplx_male,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             else:
-                fit = smplfit.tf.full_fitting.Fitter(self.smplx_neutral,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplx_neutral,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
         elif body_model_out == 'smplxlh':
             if gender_out == 'female':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplxlh_female,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplxlh_female,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             elif gender_out == 'male':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplxlh_male,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplxlh_male,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             else:
-                fit = smplfit.tf.full_fitting.Fitter(self.smplxlh_neutral,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplxlh_neutral,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
         elif body_model_out == 'smplh':
             if gender_out == 'female':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplh_female,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplh_female,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             else:
-                fit = smplfit.tf.full_fitting.Fitter(self.smplh_male,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplh_male,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
         else:
             if gender_out == 'female':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplh16_female,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplh16_female,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             elif gender_out == 'male':
-                fit = smplfit.tf.full_fitting.Fitter(self.smplh16_male,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplh16_male,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
             else:
-                fit = smplfit.tf.full_fitting.Fitter(self.smplh16_neutral,
-                                                          num_betas=num_betas_out).fit(to_fit=verts,
-                                                                                       n_iter=1,
-                                                                                       l2_regularizer=0,
-                                                                                       final_adjust_rots=True,
-                                                                                       requested_keys=[
-                                                                                           'pose_rotvecs',
-                                                                                           'shape_betas'])
+                fit = smplfit.tf.full_fitting.SMPLfit(self.smplh16_neutral,
+                                                         num_betas=num_betas_out).fit(
+                    target_vertices=verts, n_iter=1, beta_regularizer=0, final_adjust_rots=True,
+                    requested_keys=[
+                        'pose_rotvecs',
+                        'shape_betas'])
                 return fit['pose_rotvecs'], fit['shape_betas'], fit['trans']
 
     def smpl_verts_to_smplx_verts(self, smpl_verts):
