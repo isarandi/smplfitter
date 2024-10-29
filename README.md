@@ -1,6 +1,6 @@
-# SMPLfit
+# SMPLFitter
 
-<img src="figures/example.gif" alt="on_image" width="500"/>
+<img src="docs/_static/figures/example.gif" alt="on_image" width="500"/>
 
 This repository contains code for efficiently fitting parametric SMPL/SMPL+H/SMPL-X human body models to nonparametric 3D vertex and joint locations. The input needs to be in correspondence with the body template - this code does not handle unordered input point clouds.
 
@@ -13,10 +13,10 @@ We provide the implementation in **PyTorch, TensorFlow and NumPy**.
 The algorithm is **fast**, optimized for **batch** processing, can run on the **GPU** and is **differentiable**. It can fit a batch of 4096 instances in 423 ms on a single RTX 3090 GPU giving a throughput of **9481 fits per second**. At the small batch size regime (batch size 32), the throughput is still 1839 fits/second. When using a subset of 1024 vertices (which still allows high-quality fits), one can fit a batch of 16382 instances in 440 ms. For 25 fps videos, this means you can fit SMPL params to every frame of 10 minutes of nonparametric motion data in less than half a second.
 
 
-## Setup
+## Installation
 
 ```bash
-pip install git+https://github.com/isarandi/smplfit.git
+pip install git+https://github.com/isarandi/smplfitter.git
 ```
 
 (Packaging for PyPI is planned for later.)
@@ -54,13 +54,15 @@ You can refer to the relevant [script](https://github.com/isarandi/PosePile/tree
 
 ## Usage Examples
 
-### Fitting to Vertices and Joints
+### Basic Fitting
+
 ```python
 import torch
-from smplfit.pt import SMPL, SMPLfit
+from smplfitter import SMPLBodyModel, SMPLFitter
 
-body_model = SMPL(model_name='smpl', gender='neutral').cuda() # create the body model to be fitted
-fitter = SMPLfit(body_model, num_betas=10).cuda()  # create the fitter
+body_model = SMPLBodyModel(model_name='smpl',
+                           gender='neutral').cuda()  # create the body model to be fitted
+fitter = SMPLFitter(body_model, num_betas=10).cuda()  # create the fitter
 fitter = torch.jit.script(fitter)  # optional: compile the fitter for faster execution
 
 # Obtain a batch of nonparametric vertex and joint locations (here we use dummy random data)
@@ -69,21 +71,40 @@ vertices = torch.rand((batch_size, 6890, 3)).cuda()
 joints = torch.rand((batch_size, 24, 3)).cuda()
 
 # Do the fitting!
-fit_res = fitter.fit(vertices, joints, n_iter=3, beta_regularizer=1)  
+fit_res = fitter.fit(vertices, joints, n_iter=3, beta_regularizer=1)
 fit_res['pose_rotvecs'], fit_res['shape_betas'], fit_res['trans']
 ```
 
+### Body Model Conversion (Transfer)
+
+```python
+import torch
+from smplfitter import SMPLConverter
+
+smpl2smplx = SMPLConverter('smpl', 'neutral', 'smplx', 'neutral').cuda()
+smpl2smplx = torch.jit.script(smpl2smplx)  # optional: compile the converter for faster execution
+
+batch_size = 30
+pose_rotvecs_in = torch.rand((batch_size, 72)).cuda()
+shape_betas_in = torch.rand((batch_size, 10)).cuda()
+trans_in = torch.rand((batch_size, 3)).cuda()
+
+out = smpl2smplx.convert(pose_rotvecs_in, shape_betas_in, trans_in)
+out['pose_rotvecs'], out['shape_betas'], out['trans']
+```
+
+
 ## The Algorithm
 
-SMPL(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
+SMPLBodyModel(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
 
 Our algorithm alternates between fitting orientations and fitting shape. A good result can be obtained already with 1-3 iterations.
 
 We illustrate the steps with the following example. Given the depicted RGB image, we used NLF to obtain nonparametric vertex and joint locations as follows:
 
-<img src="figures/image.png" alt="on_image" width="300"/>
-<img src="figures/on_image.png" alt="on_image" width="300"/>
-<img src="figures/pose3d.png" alt="on_image" width="300"/>
+<img src="docs/_static/figures/image.png" alt="on_image" width="300"/>
+<img src="docs/_static/figures/on_image.png" alt="on_image" width="300"/>
+<img src="docs/_static/figures/pose3d.png" alt="on_image" width="300"/>
 
 ### Fitting Body Part Orientations
 
@@ -91,23 +112,23 @@ We first **partition the body** based on the linear blend skinning (LBS) weights
 
 We illustrate the partitioning on both the target and the template reference:
 
-<img src="figures/pose3d_parts_color.png" alt="tmean_parts" width="450"/>
-<img src="figures/tmean_parts.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/pose3d_parts_color.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/tmean_parts.png" alt="tmean_parts" width="450"/>
 
 We can separate the body parts for better visualization:
 
-<img src="figures/pose3d_parts_color_blown.png" alt="tmean_parts" width="450"/>
-<img src="figures/tmean_parts_blown.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/pose3d_parts_color_blown.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/tmean_parts_blown.png" alt="tmean_parts" width="450"/>
 
 
 For each body part, we have a set of target vertices from the input and a set of reference vertices, initially from the default SMPL template mesh. We apply the **Kabsch algorithm** to get the least-squares optimal rotation between the target and the reference vertices of each body part.
 
 The first figure below shows the body parts of the target (blue) and reference (red) pairwise aligned at the centroid. The second figure shows the result of the Kabsch algorithm, with each body part independently and optimally rotated. In the third figure we show the SMPL mesh with the estimated orientations applied (red), compared with the target mesh (blue). (Note how the body shape and size do not align well yet.)
 
-<img src="figures/parts_overlay1.png" alt="tmean_parts" width="300"/>
-<img src="figures/parts_overlay1_rot.png" alt="tmean_parts" width="300"/>
+<img src="docs/_static/figures/parts_overlay1.png" alt="tmean_parts" width="300"/>
+<img src="docs/_static/figures/parts_overlay1_rot.png" alt="tmean_parts" width="300"/>
 
-<img src="figures/overlay_after_rot1.png" alt="tmean_parts" width="300"/>
+<img src="docs/_static/figures/overlay_after_rot1.png" alt="tmean_parts" width="300"/>
 
 
 In subsequent iterations, the reference is no longer the default template, but the SMPL mesh posed and shaped according to the current parametric estimate.
@@ -132,8 +153,8 @@ The shape vector can be regularized with an L2 penalty, which is useful when the
 
 Below we show the overlay of target and reference before  and after shape fitting (observe how the silhouette is much better matched after shape fitting):
 
-<img src="figures/overlay_after_rot1.png" alt="tmean_parts" width="450"/>
-<img src="figures/overlay_after_rot1_shape.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/overlay_after_rot1.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/overlay_after_rot1_shape.png" alt="tmean_parts" width="450"/>
 
 ### Final Orientation Adjustment
 
@@ -143,9 +164,9 @@ Therefore, we optionally perform a final adjustment of the orientations, where w
 
 Below we illustrate the effect of this step. The first image shows the situation after two iterations of orientation and shape fitting, but before the final adjustment. The second one is after the adjustment.
 
-<img src="figures/overlay_after_rot2_shape.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/overlay_after_rot2_shape.png" alt="tmean_parts" width="450"/>
 
-<img src="figures/overlay_after_rot3.png" alt="tmean_parts" width="450"/>
+<img src="docs/_static/figures/overlay_after_rot3.png" alt="tmean_parts" width="450"/>
 
 The difference is visually subtle, but can be seen around the upper right arm and armpit area, as well as the heel of the right foot.
 
@@ -164,7 +185,7 @@ Our algorithm supports **vertex and joint weights**. The weights are used in bot
 If you have several nonparametric body estimates for the same person in different poses (such as from a video), you can fit all of them together, estimating one shared shape vector for all instances of the batch, while not sharing the orientation parameters. This way the body shape will be more accurately estimated, as there are multiple observations to estimate it from and the output will be more consistent over time.
 
 ### Scaling (experimental)
-If you don't trust your input to have the correct metric scale, the shape fitting step can be extended by a scale fitting as well. There are two ways to do this: 1) we estimating a scale factor for the target body (your input), or 2) we estimate a scale factor for the reference body (the resulting output). Neither is really satisfactory, hence experimental. The former will bias the estimation towards smaller bodies as the vertex-to-vertex error that is being minimized scales with body size, and so the solver will favor scaling down the target and producing a beta vector for a smaller person. Estimating the scale for the reference body causes an issue if we want to share the betas among many instances, since the problem becomes quadratic (the beta variables get multiplied by the scale factor variable). For just one instance, this is doable, though messes with the L2 regularization strength. Tentatively, we recommend using the first option, but accounting for the scale bias by e.g. dividing by the mean estimated scale for a longer video sequence.
+If you don't trust your input to have the correct metric scale, the shape fitting step can be extended by a scale fitting as well. There are two ways to do this: 1) we estimate a scale factor for the target body (your input), or 2) we estimate a scale factor for the reference body (the resulting output). Neither is really satisfactory, hence experimental. The former will bias the estimation towards smaller bodies as the vertex-to-vertex error that is being minimized scales with body size, and so the solver will favor scaling down the target and producing a beta vector for a smaller person. Estimating the scale for the reference body causes an issue if we want to share the betas among many instances, since the problem becomes quadratic (the beta variables get multiplied by the scale factor variable). For just one instance, this is doable, though messes with the L2 regularization strength. Tentatively, we recommend using the first option, but accounting for the scale bias by e.g. dividing by the mean estimated scale for a longer video sequence.
 
 
 ## Citation
