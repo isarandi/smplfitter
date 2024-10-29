@@ -1,6 +1,6 @@
 # SMPLFitter
 
-<img src="docs/_static/figures/example.gif" alt="on_image" width="500"/>
+<img src="docs/source/_static/figures/example.gif" alt="on_image" width="500"/>
 
 This repository contains code for efficiently fitting parametric SMPL/SMPL+H/SMPL-X human body models to nonparametric 3D vertex and joint locations. The input needs to be in correspondence with the body template - this code does not handle unordered input point clouds.
 
@@ -60,8 +60,7 @@ You can refer to the relevant [script](https://github.com/isarandi/PosePile/tree
 import torch
 from smplfitter import SMPLBodyModel, SMPLFitter
 
-body_model = SMPLBodyModel(model_name='smpl',
-                           gender='neutral').cuda()  # create the body model to be fitted
+body_model = SMPLBodyModel('smpl', 'neutral').cuda()  # create the body model to be fitted
 fitter = SMPLFitter(body_model, num_betas=10).cuda()  # create the fitter
 fitter = torch.jit.script(fitter)  # optional: compile the fitter for faster execution
 
@@ -102,9 +101,9 @@ Our algorithm alternates between fitting orientations and fitting shape. A good 
 
 We illustrate the steps with the following example. Given the depicted RGB image, we used NLF to obtain nonparametric vertex and joint locations as follows:
 
-<img src="docs/_static/figures/image.png" alt="on_image" width="300"/>
-<img src="docs/_static/figures/on_image.png" alt="on_image" width="300"/>
-<img src="docs/_static/figures/pose3d.png" alt="on_image" width="300"/>
+<img src="docs/source/_static/figures/image.png" alt="on_image" width="300"/>
+<img src="docs/source/_static/figures/on_image.png" alt="on_image" width="300"/>
+<img src="docs/source/_static/figures/pose3d.png" alt="on_image" width="300"/>
 
 ### Fitting Body Part Orientations
 
@@ -112,23 +111,23 @@ We first **partition the body** based on the linear blend skinning (LBS) weights
 
 We illustrate the partitioning on both the target and the template reference:
 
-<img src="docs/_static/figures/pose3d_parts_color.png" alt="tmean_parts" width="450"/>
-<img src="docs/_static/figures/tmean_parts.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/pose3d_parts_color.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/tmean_parts.png" alt="tmean_parts" width="450"/>
 
 We can separate the body parts for better visualization:
 
-<img src="docs/_static/figures/pose3d_parts_color_blown.png" alt="tmean_parts" width="450"/>
-<img src="docs/_static/figures/tmean_parts_blown.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/pose3d_parts_color_blown.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/tmean_parts_blown.png" alt="tmean_parts" width="450"/>
 
 
 For each body part, we have a set of target vertices from the input and a set of reference vertices, initially from the default SMPL template mesh. We apply the **Kabsch algorithm** to get the least-squares optimal rotation between the target and the reference vertices of each body part.
 
 The first figure below shows the body parts of the target (blue) and reference (red) pairwise aligned at the centroid. The second figure shows the result of the Kabsch algorithm, with each body part independently and optimally rotated. In the third figure we show the SMPL mesh with the estimated orientations applied (red), compared with the target mesh (blue). (Note how the body shape and size do not align well yet.)
 
-<img src="docs/_static/figures/parts_overlay1.png" alt="tmean_parts" width="300"/>
-<img src="docs/_static/figures/parts_overlay1_rot.png" alt="tmean_parts" width="300"/>
+<img src="docs/source/_static/figures/parts_overlay1.png" alt="tmean_parts" width="300"/>
+<img src="docs/source/_static/figures/parts_overlay1_rot.png" alt="tmean_parts" width="300"/>
 
-<img src="docs/_static/figures/overlay_after_rot1.png" alt="tmean_parts" width="300"/>
+<img src="docs/source/_static/figures/overlay_after_rot1.png" alt="tmean_parts" width="300"/>
 
 
 In subsequent iterations, the reference is no longer the default template, but the SMPL mesh posed and shaped according to the current parametric estimate.
@@ -153,8 +152,8 @@ The shape vector can be regularized with an L2 penalty, which is useful when the
 
 Below we show the overlay of target and reference before  and after shape fitting (observe how the silhouette is much better matched after shape fitting):
 
-<img src="docs/_static/figures/overlay_after_rot1.png" alt="tmean_parts" width="450"/>
-<img src="docs/_static/figures/overlay_after_rot1_shape.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/overlay_after_rot1.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/overlay_after_rot1_shape.png" alt="tmean_parts" width="450"/>
 
 ### Final Orientation Adjustment
 
@@ -164,9 +163,9 @@ Therefore, we optionally perform a final adjustment of the orientations, where w
 
 Below we illustrate the effect of this step. The first image shows the situation after two iterations of orientation and shape fitting, but before the final adjustment. The second one is after the adjustment.
 
-<img src="docs/_static/figures/overlay_after_rot2_shape.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/overlay_after_rot2_shape.png" alt="tmean_parts" width="450"/>
 
-<img src="docs/_static/figures/overlay_after_rot3.png" alt="tmean_parts" width="450"/>
+<img src="docs/source/_static/figures/overlay_after_rot3.png" alt="tmean_parts" width="450"/>
 
 The difference is visually subtle, but can be seen around the upper right arm and armpit area, as well as the heel of the right foot.
 
