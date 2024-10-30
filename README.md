@@ -140,9 +140,9 @@ We found it important to **weight the joints much higher than the vertices** whe
 
 In SMPL, the L stands for linear, and so SMPL has a nice property: as long as the body part orientations $\theta$ are fixed, the **mapping from shape vector to vertex locations is linear** (the same applies to the joints), so solving for the shape boils down to a linear least squares problem.
 
-SMPL is linear because going from shape vector to vertex location only involves matrix multiplications and adding constants: multiplying by the blend shapes, adding the template, adding pose-dependent blendshapes (which are constant for a fixed pose), multiplying by rotation matrices and multiplying by the linear blend skinning weights.
+SMPL is linear because going from shape vector to vertex location only involves matrix multiplications and adding constants: multiplying by the blend shapes, adding the template, adding pose-dependent blendshapes (which are constant for a fixed pose), multiplying by rotation matrices and multiplying by the linear blend skinning weights. (Technically, it's affine, not linear, but it boils down to the same thing.)
 
-Thanks to this linearity, for each vertex index $i$ there is a matrix $A_i(\theta)\in \mathbb{R}^{3\times 10}$ and vector $b_i(\theta)\in \mathbb{R}^3$ such that the vertex location can be written as
+This means that for each vertex index $i$ there is a matrix $A_i(\theta)\in \mathbb{R}^{3\times 10}$ and vector $b_i(\theta)\in \mathbb{R}^3$ such that the vertex location can be written as
 
 $$v_i(\theta, \beta) = A_i(\theta) \beta + b_i(\theta).$$
 
