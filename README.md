@@ -95,7 +95,7 @@ out['pose_rotvecs'], out['shape_betas'], out['trans']
 
 ## The Algorithm
 
-SMPLBodyModel(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
+SMPL(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
 
 Our algorithm alternates between fitting orientations and fitting shape. A good result can be obtained already with 1-3 iterations.
 
