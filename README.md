@@ -1,4 +1,4 @@
-# SMPLFitter
+# SMPLFitter: The Fast Way From Vertices to Parametric 3D Humans
 
 <img src="docs/source/_static/figures/example.gif" alt="on_image" width="500"/>
 
@@ -10,7 +10,9 @@ Example use cases:
 
 We provide the implementation in **PyTorch, TensorFlow and NumPy**. 
 
-The algorithm is **fast**, optimized for **batch** processing, can run on the **GPU** and is **differentiable**. It can fit a batch of 4096 instances in 423 ms on a single RTX 3090 GPU giving a throughput of **9481 fits per second**. At the small batch size regime (batch size 32), the throughput is still 1839 fits/second. When using a subset of 1024 vertices (which still allows high-quality fits), one can fit a batch of 16382 instances in 440 ms. For 25 fps videos, this means you can fit SMPL params to every frame of 10 minutes of nonparametric motion data in less than half a second.
+The algorithm is **fast**, optimized for **batch** processing, can run on the **GPU** and is **differentiable**. There are no learnable parameters here, nor sensitivity to initialization. Just solving equation systems.
+
+It can fit a batch of 4096 instances in 423 ms on a single RTX 3090 GPU giving a throughput of **9481 fits per second**. At the small batch size regime (batch size 32), the throughput is still 1839 fits/second. When using a subset of 1024 vertices (which still allows high-quality fits), one can fit a batch of 16384 instances in 440 ms. For 25 fps videos, this means you can fit SMPL params to every frame of 10 minutes of nonparametric motion data in less than half a second.
 
 
 ## Installation
@@ -95,7 +97,7 @@ out['pose_rotvecs'], out['shape_betas'], out['trans']
 
 ## The Algorithm
 
-SMPLBodyModel(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
+SMPL(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
 
 Our algorithm alternates between fitting orientations and fitting shape. A good result can be obtained already with 1-3 iterations.
 
@@ -138,9 +140,9 @@ We found it important to **weight the joints much higher than the vertices** whe
 
 In SMPL, the L stands for linear, and so SMPL has a nice property: as long as the body part orientations $\theta$ are fixed, the **mapping from shape vector to vertex locations is linear** (the same applies to the joints), so solving for the shape boils down to a linear least squares problem.
 
-SMPL is linear because going from shape vector to vertex location only involves matrix multiplications and adding constants: multiplying by the blend shapes, adding the template, adding pose-dependent blendshapes (which are constant for a fixed pose), multiplying by rotation matrices and multiplying by the linear blend skinning weights.
+SMPL is linear because going from shape vector to vertex location only involves matrix multiplications and adding constants: multiplying by the blend shapes, adding the template, adding pose-dependent blendshapes (which are constant for a fixed pose), multiplying by rotation matrices and multiplying by the linear blend skinning weights. (Technically, it's affine, not linear, but it boils down to the same thing.)
 
-Thanks to this linearity, for each vertex index $i$ there is a matrix $A_i(\theta)\in \mathbb{R}^{3\times 10}$ and vector $b_i(\theta)\in \mathbb{R}^3$ such that the vertex location can be written as
+This means that for each vertex index $i$ there is a matrix $A_i(\theta)\in \mathbb{R}^{3\times 10}$ and vector $b_i(\theta)\in \mathbb{R}^3$ such that the vertex location can be written as
 
 $$v_i(\theta, \beta) = A_i(\theta) \beta + b_i(\theta).$$
 
