@@ -3,7 +3,7 @@ import os
 
 import tensorflow as tf
 from smplfitter.tf.bodymodel import SMPLBodyModel
-
+from smplfitter.tf.fitter import SMPLFitter
 
 @functools.lru_cache()
 def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):

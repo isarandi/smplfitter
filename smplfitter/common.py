@@ -9,7 +9,7 @@ import sys
 import contextlib
 
 
-def initialize(model_name, gender, model_root=None):
+def initialize(model_name, gender, model_root=None, num_betas=None):
     if model_root is None:
         model_root = f'{os.environ["DATA_ROOT"]}/body_models/{model_name}'
 
@@ -66,7 +66,6 @@ def initialize(model_name, gender, model_root=None):
     else:
         res['J_template'] = res['J_regressor'] @ res['v_template']
 
-    res['v_dirs'] = np.concatenate([res['shapedirs'], res['posedirs']], axis=2)
     res['v_template'] = res['v_template'] - np.einsum(
         'vcx,x->vc', res['posedirs'],
         np.reshape(np.tile(np.eye(3, dtype=np.float64), [res['num_joints'] - 1, 1]), [-1])
@@ -74,12 +73,11 @@ def initialize(model_name, gender, model_root=None):
 
     tensors = {
         'v_template': res['v_template'],
-        'shapedirs': res['shapedirs'],
+        'shapedirs': res['shapedirs'][:, :, :num_betas],
         'posedirs': res['posedirs'],
-        'v_dirs': res['v_dirs'],
         'J_regressor': res['J_regressor'],
         'J_template': res['J_template'],
-        'J_shapedirs': res['J_shapedirs'],
+        'J_shapedirs': res['J_shapedirs'][:, :, :num_betas],
         'kid_shapedir': res['kid_shapedir'],
         'kid_J_shapedir': res['kid_J_shapedir'],
         'weights': res['weights'],
@@ -103,10 +101,20 @@ def monkey_patched_for_chumpy():
     not available anymore.
     """
     added = []
-    for name in ['bool', 'int', 'float', 'complex', 'object', 'str']:
+    for name in ['bool', 'int', 'object', 'str']:
         if name not in dir(np):
-            sys.modules[f'numpy.{name}'] = getattr(np, name + '_')
-            added.append(name)
+            try:
+                sys.modules[f'numpy.{name}'] = getattr(np, name + '_')
+                added.append(name)
+            except:
+                pass
+
+    sys.modules[f'numpy.float'] = float
+    sys.modules[f'numpy.complex'] = np.complex128
+    sys.modules[f'numpy.NINF'] = -np.inf
+    np.NINF = -np.inf
+    np.complex = np.complex128
+    np.float = float
 
     if 'unicode' not in dir(np):
         sys.modules['numpy.unicode'] = np.str_

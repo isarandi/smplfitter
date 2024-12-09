@@ -9,6 +9,7 @@ import smplfitter.pt.fitter
 from smplfitter.pt.bodymodel import SMPLBodyModel
 from smplfitter.pt.converter import SMPLConverter
 from smplfitter.pt.fitter import SMPLFitter
+from smplfitter.pt.flipper import SMPLFlipper
 
 
 @functools.lru_cache()

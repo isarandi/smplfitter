@@ -5,7 +5,7 @@ from smplfitter.tf.rotation import mat2rotvec, rotvec2mat
 
 
 class SMPLBodyModel:
-    def __init__(self, model_name='smpl', gender='neutral', model_root=None):
+    def __init__(self, model_name='smpl', gender='neutral', model_root=None, unit='m', num_betas=None):
         """
         Args:
             model_root: path to pickle files for the model (see https://smpl.is.tue.mpg.de).
@@ -13,11 +13,10 @@ class SMPLBodyModel:
         """
         self.gender = gender
         self.model_name = model_name
-        tensors, nontensors = smplfitter.common.initialize(model_name, gender, model_root)
+        tensors, nontensors = smplfitter.common.initialize(model_name, gender, model_root, num_betas)
         self.v_template = tf.constant(tensors['v_template'], tf.float32)
         self.shapedirs = tf.constant(tensors['shapedirs'], tf.float32)
         self.posedirs = tf.constant(tensors['posedirs'], tf.float32)
-        self.v_dirs = tf.constant(tensors['v_dirs'], tf.float32)
         self.J_regressor = tf.constant(tensors['J_regressor'], tf.float32)
         self.J_template = tf.constant(tensors['J_template'], tf.float32)
         self.J_shapedirs = tf.constant(tensors['J_shapedirs'], tf.float32)
@@ -28,6 +27,7 @@ class SMPLBodyModel:
         self.faces = nontensors['faces']
         self.num_joints = nontensors['num_joints']
         self.num_vertices = nontensors['num_vertices']
+        self.unit_factor = dict(mm=1000, cm=100, m=1)[unit]
 
     def __call__(
             self, pose_rotvecs=None, shape_betas=None, trans=None, kid_factor=None,
@@ -132,8 +132,8 @@ class SMPLBodyModel:
                 self.weights @ translations)
 
         return dict(
-            joints=glob_positions + trans[:, tf.newaxis],
-            vertices=vertices + trans[:, tf.newaxis],
+            joints=(glob_positions + trans[:, tf.newaxis]) * self.unit_factor,
+            vertices=(vertices + trans[:, tf.newaxis]) * self.unit_factor,
             orientations=glob_rotmats)
 
     def single(self, *args, return_vertices=True, **kwargs):
@@ -158,7 +158,7 @@ class SMPLBodyModel:
         pelvis = (
                 self.J_template[0] +
                 self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
-                self.kid_J_shapedir[0] * kid_factor)
+                self.kid_J_shapedir[0] * kid_factor) * self.unit_factor
         if post_translate:
             new_trans = (
                     tf.matmul(trans, R, transpose_b=True) + t +

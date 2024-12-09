@@ -3,8 +3,9 @@ import smplfitter.common
 from smplfitter.np.rotation import rotvec2mat, mat2rotvec
 from smplfitter.np.util import matmul_transp_a
 
+
 class SMPLBodyModel:
-    def __init__(self, model_name='smpl', gender='neutral', model_root=None):
+    def __init__(self, model_name='smpl', gender='neutral', model_root=None, unit='m', num_betas=None):
         """
         Args:
             model_root: path to pickle files for the model (see https://smpl.is.tue.mpg.de).
@@ -15,11 +16,10 @@ class SMPLBodyModel:
         """
         self.gender = gender
         self.model_name = model_name
-        tensors, nontensors = smplfitter.common.initialize(model_name, gender, model_root)
+        tensors, nontensors = smplfitter.common.initialize(model_name, gender, model_root, num_betas)
         self.v_template = np.array(tensors['v_template'], np.float32)
         self.shapedirs = np.array(tensors['shapedirs'], np.float32)
         self.posedirs = np.array(tensors['posedirs'], np.float32)
-        self.v_dirs = np.array(tensors['v_dirs'], np.float32)
         self.J_regressor = np.array(tensors['J_regressor'], np.float32)
         self.J_template = np.array(tensors['J_template'], np.float32)
         self.J_shapedirs = np.array(tensors['J_shapedirs'], np.float32)
@@ -30,6 +30,7 @@ class SMPLBodyModel:
         self.faces = nontensors['faces']
         self.num_joints = nontensors['num_joints']
         self.num_vertices = nontensors['num_vertices']
+        self.unit_factor = dict(mm=1000, cm=100, m=1)[unit]
 
     def __call__(
             self, pose_rotvecs=None, shape_betas=None, trans=None, kid_factor=None,
@@ -122,7 +123,9 @@ class SMPLBodyModel:
             trans = trans.astype(np.float32)
 
         if not return_vertices:
-            return dict(joints=glob_positions + trans[:, np.newaxis], orientations=glob_rotmats)
+            return dict(
+                joints=(glob_positions + trans[:, np.newaxis]) * self.unit_factor,
+                orientations=glob_rotmats)
 
         pose_feature = np.reshape(rel_rotmats[:, 1:], [-1, (self.num_joints - 1) * 3 * 3])
         v_posed = (
@@ -138,8 +141,8 @@ class SMPLBodyModel:
                 self.weights @ translations)
 
         return dict(
-            vertices=vertices + trans[:, np.newaxis],
-            joints=glob_positions + trans[:, np.newaxis],
+            vertices=vertices * self.unit_factor + trans[:, np.newaxis],
+            joints=glob_positions * self.unit_factor + trans[:, np.newaxis],
             orientations=glob_rotmats)
 
     def single(self, *args, return_vertices=True, **kwargs):
@@ -163,15 +166,38 @@ class SMPLBodyModel:
             [mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)
 
         pelvis = (
-                self.J_template[0] +
-                self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
-                self.kid_J_shapedir[0] * kid_factor
-        )
+                         self.J_template[0] +
+                         self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
+                         self.kid_J_shapedir[0] * kid_factor
+                 ) * self.unit_factor
+
         if post_translate:
             new_trans = pelvis @ (R.T - np.eye(3)) + trans @ R.T + t
         else:
             new_trans = pelvis @ (R.T - np.eye(3)) + (trans - t) @ R.T
         return new_pose_rotvec, new_trans
+
+    def transform(
+            self, extrinsic_matrix, pose_rotvecs, shape_betas, trans, kid_factor=0):
+        """Rotate and translate the SMPL body model carefully, taking into account that the
+        global orientation is applied with the pelvis as anchor, not the origin of the canonical
+        coordinate system!
+        The translation vector needs to be changed accordingly, too, not just the pose.
+        """
+        from scipy.spatial.transform import Rotation
+        #current_rotmat = rotvec2mat(pose_rotvecs[:3])
+        current_rotmat = Rotation.from_rotvec(pose_rotvecs[:3]).as_matrix()
+        new_rotmat = extrinsic_matrix[:3, :3] @ current_rotmat
+        new_pose_rotvec = np.concatenate(
+            [Rotation.from_matrix(new_rotmat).as_rotvec(), pose_rotvecs[3:]], axis=0)
+        pelvis = (
+                         self.J_template[0] +
+                         self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
+                         self.kid_J_shapedir[0] * kid_factor
+                 ) * self.unit_factor
+        new_trans = pelvis @ (R.T - np.eye(3)) + trans @ R.T + extrinsic_matrix[:3, 3]
+        return new_pose_rotvec, new_trans
+
 
 
 def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats):

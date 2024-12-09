@@ -3,18 +3,21 @@ from typing import Optional
 
 
 def lstsq(
-    matrix: torch.Tensor,
-    rhs: torch.Tensor,
-    weights: torch.Tensor,
-    l2_regularizer: Optional[torch.Tensor] = None,
-    shared: bool = False
+        matrix: torch.Tensor,
+        rhs: torch.Tensor,
+        weights: torch.Tensor,
+        l2_regularizer: Optional[torch.Tensor] = None,
+        l2_regularizer_rhs: Optional[torch.Tensor] = None,
+        shared: bool = False
 ) -> torch.Tensor:
     weighted_matrix = weights.unsqueeze(-1) * matrix
     regularized_gramian = weighted_matrix.mT @ matrix
     if l2_regularizer is not None:
-        regularized_gramian += torch.diag(l2_regularizer)
+        regularized_gramian += l2_regularizer  # torch.diag(l2_regularizer)
 
     ATb = weighted_matrix.mT @ rhs
+    if l2_regularizer_rhs is not None:
+        ATb += l2_regularizer_rhs
 
     if shared:
         regularized_gramian = regularized_gramian.sum(dim=0, keepdim=True)
@@ -23,12 +26,13 @@ def lstsq(
     chol = torch.linalg.cholesky(regularized_gramian)
     return torch.cholesky_solve(ATb, chol)
 
+
 def lstsq_partial_share(
-    matrix: torch.Tensor,
-    rhs: torch.Tensor,
-    weights: torch.Tensor,
-    l2_regularizer: torch.Tensor,
-    n_shared: int = 0
+        matrix: torch.Tensor,
+        rhs: torch.Tensor,
+        weights: torch.Tensor,
+        l2_regularizer: torch.Tensor,
+        n_shared: int = 0
 ) -> torch.Tensor:
     n_params = matrix.shape[-1]
     n_rhs_outputs = rhs.shape[-1]
@@ -73,7 +77,7 @@ def lstsq_partial_share(
 
 
 def batch_eye(
-    n_params: int,
-    batch_size: int
+        n_params: int,
+        batch_size: int
 ) -> torch.Tensor:
     return torch.eye(n_params).reshape(1, n_params, n_params).expand(batch_size, -1, -1)

@@ -29,7 +29,7 @@ class SMPLConverter(nn.Module):
             gender_out: str,
             num_betas_out: int = 10
     ):
-        super(SMPLConverter, self).__init__()
+        super().__init__()
         self.body_model_in = SMPLBodyModel(model_name=body_model_in, gender=gender_in)
         self.body_model_out = SMPLBodyModel(model_name=body_model_out, gender=gender_out)
         self.fitter = SMPLFitter(self.body_model_out, num_betas=num_betas_out, enable_kid=True)
@@ -43,11 +43,12 @@ class SMPLConverter(nn.Module):
             vertex_converter_path = None
 
         if vertex_converter_path is not None:
-            scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
             self.vertex_converter_csr = scipy2torch_csr(
-                scipy_csr[:, :self.body_model_in.num_vertices])
+                load_vertex_converter_csr(vertex_converter_path))
         else:
             self.vertex_converter_csr = None
+
+
 
     @torch.jit.export
     def convert_vertices(self, inp_vertices: torch.Tensor) -> torch.Tensor:
@@ -124,6 +125,9 @@ class SMPLConverter(nn.Module):
         return fit_out
 
 
+def load_vertex_converter_csr(vertex_converter_path):
+    scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
+    return scipy_csr[:, :scipy_csr.shape[1]//2]
 
 
 def load_pickle(path):

@@ -6,22 +6,41 @@ import torch.nn as nn
 
 from smplfitter.pt.lstsq import lstsq, lstsq_partial_share
 from smplfitter.pt.rotation import kabsch, mat2rotvec, rotvec2mat
+import smplfitter.pt.lstsq
+import importlib
 
+
+# importlib.reload(smplfitter.pt.lstsq)
+# lstsq = smplfitter.pt.lstsq.lstsq
 
 class SMPLFitter(nn.Module):
     """
-    Class for fitting body model (SMPL/SMPL-X/SMPL+H) parameters to lists of target vertices and joints.
+    Class for fitting body model (SMPL/SMPL-X/SMPL+H) parameters to lists of target vertices and
+    joints.
 
     Parameters:
-        body_model (nn.Module): The SMPL model instance we wish to fit, of a certain model variant and gender.
-        num_betas (int, optional): Number of shape parameters (betas) to use when fitting. Default is 10.
-        enable_kid (bool, optional): If True, enables the use of a kid blendshape, allowing for fitting kid shapes as in AGORA. Default is False.
-        vertex_subset (Optional[torch.Tensor], optional): A tensor specifying a subset of vertices to use
-                                                          in the fitting process, allowing partial fitting.
-                                                          Default is None, meaning all vertices are used. The subset of vertices should cover all body parts to provide enough constraints.
-        joint_regressor (Optional[torch.Tensor], optional): A regression matrix of shape (num_joints, num_vertices) for obtaining joint locations, in case the target joints are not specified when fitting. Defaults to the joint regressor of the body model, however a custom one must be supplied if `vertex_subset` is partial and target joint locations will not be provided.
+        body_model (nn.Module): The SMPL model instance we wish to fit, of a certain model
+        variant and gender.
+        num_betas (int, optional): Number of shape parameters (betas) to use when fitting.
+        Default is 10.
+        enable_kid (bool, optional): If True, enables the use of a kid blendshape, allowing for
+        fitting kid shapes as in AGORA. Default is False.
+        vertex_subset (Optional[torch.Tensor], optional): A tensor specifying a subset of
+        vertices to use
+                                                          in the fitting process, allowing
+                                                          partial fitting.
+                                                          Default is None, meaning all vertices
+                                                          are used. The subset of vertices should
+                                                          cover all body parts to provide enough
+                                                          constraints.
+        joint_regressor (Optional[torch.Tensor], optional): A regression matrix of shape (
+        num_joints, num_vertices) for obtaining joint locations, in case the target joints are
+        not specified when fitting. Defaults to the joint regressor of the body model, however a
+        custom one must be supplied if `vertex_subset` is partial and target joint locations will
+        not be provided.
 
     """
+
     def __init__(
             self,
             body_model: nn.Module,
@@ -32,7 +51,7 @@ class SMPLFitter(nn.Module):
     ):
         super(SMPLFitter, self).__init__()
         self.body_model = body_model
-        self.n_betas = num_betas
+        self.n_betas = num_betas if num_betas is not None else self.body_model.shapedirs.shape[2]
         self.enable_kid = enable_kid
         device = body_model.v_template.device
 
@@ -97,38 +116,64 @@ class SMPLFitter(nn.Module):
             final_adjust_rots: bool = True,
             scale_target: bool = False,
             scale_fit: bool = False,
+            initial_pose_rotvecs: Optional[torch.Tensor] = None,
+            initial_shape_betas: Optional[torch.Tensor] = None,
+            initial_kid_factor: Optional[torch.Tensor] = None,
             requested_keys: Optional[List[str]] = None
     ) -> Dict[str, torch.Tensor]:
         """
-        Fit the body model to target vertices and optionally joints by optimizing for shape and pose, and optionally others.
+        Fit the body model to target vertices and optionally joints by optimizing for shape and
+        pose, and optionally others.
 
         Parameters:
-            target_vertices (torch.Tensor): Target mesh vertices, shaped as (batch_size, num_vertices, 3).
-            target_joints (Optional[torch.Tensor], optional): Target joint locations, shaped as (batch_size, num_joints, 3).
-            vertex_weights (Optional[torch.Tensor], optional): Importance weights for each vertex during the fitting process.
-            joint_weights (Optional[torch.Tensor], optional): Importance weights for each joint during the fitting process.
-            n_iter (int, optional): Number of iterations for the optimization process. Reasonable values are in the range of 1-4. Default is 1.
-            beta_regularizer (float, optional): L2 regularization weight for shape parameters (betas). Default is 1.
-            beta_regularizer2 (float, optional): Secondary regularization for betas, affecting the first two parameters. Default is 0.
-            scale_regularizer (float, optional): Regularization term to penalize the scale factor deviating from 1. Default is 0. Has no effect unless `scale_target` or `scale_fit` is True.
-            kid_regularizer (Optional[float], optional): Regularization weight for the kid blendshape factor. Default is None. Has no effect unless `enable_kid` on the object is True.
-            share_beta (bool, optional): If True, shares the shape parameters (betas) across instances in the batch. Default is False.
-            final_adjust_rots (bool, optional): Whether to perform a final, dependent refinement of the body part orientations to improve alignment. Default is True.
-            scale_target (bool, optional): If True, estimates a scale factor to apply to the target vertices for alignment. Default is False.
-            scale_fit (bool, optional): If True, estimates a scale factor to apply to the fitted mesh for alignment. Default is False.
-            requested_keys (Optional[List[str]], optional): List of keys specifying which results to return. Default is ['pose_rotvecs']. Other options are ['relative_orientations', 'joints', 'vertices'].
+            target_vertices (torch.Tensor): Target mesh vertices, shaped as (batch_size,
+            num_vertices, 3).
+            target_joints (Optional[torch.Tensor], optional): Target joint locations, shaped as (
+            batch_size, num_joints, 3).
+            vertex_weights (Optional[torch.Tensor], optional): Importance weights for each vertex
+            during the fitting process.
+            joint_weights (Optional[torch.Tensor], optional): Importance weights for each joint
+            during the fitting process.
+            n_iter (int, optional): Number of iterations for the optimization process. Reasonable
+            values are in the range of 1-4. Default is 1.
+            beta_regularizer (float, optional): L2 regularization weight for shape parameters (
+            betas). Default is 1.
+            beta_regularizer2 (float, optional): Secondary regularization for betas, affecting
+            the first two parameters. Default is 0.
+            scale_regularizer (float, optional): Regularization term to penalize the scale factor
+            deviating from 1. Default is 0. Has no effect unless `scale_target` or `scale_fit` is
+            True.
+            kid_regularizer (Optional[float], optional): Regularization weight for the kid
+            blendshape factor. Default is None. Has no effect unless `enable_kid` on the object
+            is True.
+            share_beta (bool, optional): If True, shares the shape parameters (betas) across
+            instances in the batch. Default is False.
+            final_adjust_rots (bool, optional): Whether to perform a final, dependent refinement
+            of the body part orientations to improve alignment. Default is True.
+            scale_target (bool, optional): If True, estimates a scale factor to apply to the
+            target vertices for alignment. Default is False.
+            scale_fit (bool, optional): If True, estimates a scale factor to apply to the fitted
+            mesh for alignment. Default is False.
+            requested_keys (Optional[List[str]], optional): List of keys specifying which results
+            to return. Default is ['pose_rotvecs']. Other options are ['relative_orientations',
+            'joints', 'vertices'].
 
         Returns:
-            Dict[str, torch.Tensor]: A dictionary containing the following items, based on requested keys:
-                - 'pose_rotvecs' (torch.Tensor): Estimated pose in concatenated rotation vector format.
+            Dict[str, torch.Tensor]: A dictionary containing the following items, based on
+            requested keys:
+                - 'pose_rotvecs' (torch.Tensor): Estimated pose in concatenated rotation vector
+                format.
                 - 'shape_betas' (torch.Tensor): Estimated shape parameters (betas).
                 - 'trans' (torch.Tensor): Estimated translation parameters.
                 - 'joints' (torch.Tensor): Estimated joint positions, if requested.
                 - 'vertices' (torch.Tensor): Fitted mesh vertices, if requested.
                 - 'orientations' (torch.Tensor): Global body part orientations as rotation matrices.
-                - 'relative_orientations' (torch.Tensor): Parent-relative body part orientations as rotation matrices.
-                - 'kid_factor' (torch.Tensor): Estimated kid blendshape factor, if 'enable_kid' is True.
-                - 'scale_corr' (torch.Tensor): Estimated scale correction factor, if 'scale_target' or 'scale_fit' is True.
+                - 'relative_orientations' (torch.Tensor): Parent-relative body part orientations
+                as rotation matrices.
+                - 'kid_factor' (torch.Tensor): Estimated kid blendshape factor, if 'enable_kid'
+                is True.
+                - 'scale_corr' (torch.Tensor): Estimated scale correction factor,
+                if 'scale_target' or 'scale_fit' is True.
         """
 
         if requested_keys is None:
@@ -143,12 +188,22 @@ class SMPLFitter(nn.Module):
             target_vertices = target_vertices - target_mean[:, None]
             target_joints = target_joints - target_mean[:, None]
 
-        initial_joints = self.body_model.J_template[None]
-        initial_vertices = self.default_mesh_tf[None]
+        if initial_pose_rotvecs is not None or initial_shape_betas is not None:
+            initial_forw = self.body_model(
+                shape_betas=initial_shape_betas, kid_factor=initial_kid_factor,
+                pose_rotvecs=initial_pose_rotvecs)
+            initial_joints = initial_forw['joints']
+            initial_vertices = initial_forw['vertices'][:, self.vertex_subset]
+            glob_rotmats = self._fit_global_rotations(
+                target_vertices, target_joints, initial_vertices, initial_joints, vertex_weights,
+                joint_weights) @ initial_forw['orientations']
+        else:
+            initial_joints = self.body_model.J_template[None]
+            initial_vertices = self.default_mesh_tf[None]
+            glob_rotmats = self._fit_global_rotations(
+                target_vertices, target_joints, initial_vertices, initial_joints, vertex_weights,
+                joint_weights)
 
-        glob_rotmats = self._fit_global_rotations(
-            target_vertices, target_joints, initial_vertices, initial_joints, vertex_weights,
-            joint_weights)
         device = self.body_model.v_template.device
         parent_indices = self.body_model.kintree_parents_tensor[1:].to(device)
 
@@ -158,6 +213,8 @@ class SMPLFitter(nn.Module):
                 beta_regularizer, beta_regularizer2, scale_regularizer=0.0,
                 kid_regularizer=kid_regularizer, share_beta=share_beta, scale_target=False,
                 scale_fit=False,
+                beta_regularizer_reference=initial_shape_betas,
+                kid_regularizer_reference=initial_kid_factor,
                 requested_keys=['vertices', 'joints'] if target_joints is not None else [
                     'vertices'])
             ref_verts = result['vertices']
@@ -170,6 +227,8 @@ class SMPLFitter(nn.Module):
             glob_rotmats, target_vertices, target_joints, vertex_weights,
             joint_weights, beta_regularizer, beta_regularizer2, scale_regularizer,
             kid_regularizer, share_beta, scale_target, scale_fit,
+            beta_regularizer_reference=initial_shape_betas,
+            kid_regularizer_reference=initial_kid_factor,
             requested_keys=['vertices', 'joints']
             if target_joints is not None or final_adjust_rots else ['vertices'])
         ref_verts = result['vertices']
@@ -255,11 +314,12 @@ class SMPLFitter(nn.Module):
             share_beta: bool = False,
             scale_target: bool = False,
             scale_fit: bool = False,
+            beta_regularizer_reference: Optional[torch.Tensor] = None,
+            kid_regularizer_reference: Optional[torch.Tensor] = None,
             requested_keys: Optional[List[str]] = None
     ) -> Dict[str, torch.Tensor]:
         if requested_keys is None:
             requested_keys = []
-
         # Subtract mean first for better numerical stability (and add it back later)
         if target_joints is None:
             target_mean = torch.mean(target_vertices, dim=1)
@@ -282,7 +342,9 @@ class SMPLFitter(nn.Module):
         result = self._fit_shape(
             glob_rotmats, target_vertices, target_joints, vertex_weights,
             joint_weights, beta_regularizer, beta_regularizer2, scale_regularizer,
-            kid_regularizer, share_beta, scale_target, scale_fit)
+            kid_regularizer, share_beta, scale_target, scale_fit,
+            beta_regularizer_reference=beta_regularizer_reference,
+            kid_regularizer_reference=kid_regularizer_reference)
         ref_shape = result['shape_betas']
         ref_trans = result['trans']
         ref_kid_factor = result['kid_factor'] if self.enable_kid else None
@@ -319,6 +381,7 @@ class SMPLFitter(nn.Module):
             kid_factor: Optional[torch.Tensor] = None,
             n_iter: int = 1,
             final_adjust_rots: bool = True,
+            initial_pose_rotvecs: Optional[torch.Tensor] = None,
             scale_fit: bool = False,
             requested_keys: Optional[List[str]] = None
     ) -> Dict[str, torch.Tensor]:
@@ -334,20 +397,21 @@ class SMPLFitter(nn.Module):
             target_vertices = target_vertices - target_mean[:, None]
             target_joints = target_joints - target_mean[:, None]
 
-        initial_forw = self.body_model(shape_betas=shape_betas, kid_factor=kid_factor)
+        initial_forw = self.body_model(
+            shape_betas=shape_betas, kid_factor=kid_factor, pose_rotvecs=initial_pose_rotvecs)
         initial_joints = initial_forw['joints']
-        initial_vertices = initial_forw['vertices']
+        initial_vertices = initial_forw['vertices'][:, self.vertex_subset]
 
         glob_rotmats = self._fit_global_rotations(
             target_vertices, target_joints, initial_vertices, initial_joints, vertex_weights,
-            joint_weights)
+            joint_weights) @ initial_forw['orientations']
         device = self.body_model.v_template.device
         parent_indices = self.body_model.kintree_parents_tensor[1:].to(device)
 
         for i in range(n_iter - 1):
             result = self.body_model(
                 glob_rotmats=glob_rotmats, shape_betas=shape_betas, kid_factor=kid_factor)
-            ref_verts = result['vertices']
+            ref_verts = result['vertices'][:, self.vertex_subset]
             ref_joints = result['joints'] if target_joints is not None else None
             glob_rotmats = self._fit_global_rotations(
                 target_vertices, target_joints, ref_verts, ref_joints,
@@ -355,7 +419,7 @@ class SMPLFitter(nn.Module):
 
         result = self.body_model(
             glob_rotmats=glob_rotmats, shape_betas=shape_betas, kid_factor=kid_factor)
-        ref_verts = result['vertices']
+        ref_verts = result['vertices'][:, self.vertex_subset]
         ref_joints = result['joints']
         ref_scale_corr, ref_trans = fit_scale_and_translation(
             target_vertices, ref_verts, target_joints, ref_joints, vertex_weights, joint_weights,
@@ -430,6 +494,8 @@ class SMPLFitter(nn.Module):
             share_beta: bool = False,
             scale_target: bool = False,
             scale_fit: bool = False,
+            beta_regularizer_reference: Optional[torch.Tensor] = None,
+            kid_regularizer_reference: Optional[torch.Tensor] = None,
             requested_keys: Optional[List[str]] = None
     ) -> Dict[str, torch.Tensor]:
         if scale_target and scale_fit:
@@ -514,22 +580,41 @@ class SMPLFitter(nn.Module):
             torch.full((2,), beta_regularizer2, device=device),
             torch.full((self.n_betas - 2,), beta_regularizer, device=device)
         ])
+        if beta_regularizer_reference is None:
+            l2_regularizer_reference_all = torch.zeros([batch_size, self.n_betas], device=device)
+        else:
+            l2_regularizer_reference_all = beta_regularizer_reference
 
         if self.enable_kid:
             if kid_regularizer is None:
                 kid_regularizer = beta_regularizer
+            if kid_regularizer_reference is None:
+                kid_regularizer_reference = torch.zeros(batch_size, device=device)
             l2_regularizer_all = torch.cat(
                 [l2_regularizer_all, torch.tensor([kid_regularizer], device=device)])
+            l2_regularizer_reference_all = torch.cat(
+                [l2_regularizer_reference_all, kid_regularizer_reference[:, np.newaxis]], dim=1)
 
         if scale_target or scale_fit:
             l2_regularizer_all = torch.cat(
                 [l2_regularizer_all, torch.tensor([scale_regularizer], device=device)])
 
+        l2_regularizer_rhs = (l2_regularizer_all * l2_regularizer_reference_all).unsqueeze(-1)
+
+        l2_regularizer_all = torch.diag(l2_regularizer_all)
+        # print('Loading penalty matrix')
+        # penalty = np.load('/work_uncached/sarandi/data/projects/localizerfields
+        # /smpl_beta_penalty_mat_new.npy')
+        # penalty_bone = np.load('/work_uncached/sarandi/data/projects/localizerfields
+        # /smpl_beta_penalty_mat_bone_new.npy')
+        # l2_regularizer_all[:self.n_betas, :self.n_betas] = torch.tensor(penalty, device=device)
+        # * beta_regularizer + torch.tensor(penalty_bone, device=device) * beta_regularizer2
+
         if share_beta:
             x = lstsq_partial_share(
                 A, b, w, l2_regularizer_all, n_shared=self.n_betas + (1 if self.enable_kid else 0))
         else:
-            x = lstsq(A, b, w, l2_regularizer_all)
+            x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs=l2_regularizer_rhs)
 
         x = x.squeeze(-1)
         new_trans = mean_b.squeeze(1) - torch.matmul(mean_A.squeeze(1), x.unsqueeze(-1)).squeeze(-1)
@@ -576,8 +661,9 @@ class SMPLFitter(nn.Module):
             vertex_weights: Optional[torch.Tensor],
             joint_weights: Optional[torch.Tensor]
     ) -> torch.Tensor:
+        device = target_vertices.device
         glob_rots = []
-        mesh_weight = torch.tensor(1e-6, device=target_vertices.device, dtype=torch.float32)
+        mesh_weight = torch.tensor(1e-6, device=device, dtype=torch.float32)
         joint_weight = 1 - mesh_weight
 
         if target_joints is None or reference_joints is None:
@@ -587,9 +673,11 @@ class SMPLFitter(nn.Module):
         part_assignment = torch.argmax(self.weights, dim=1)
         # Disable the rotation of toes separately from the feet
         part_assignment = torch.where(
-            part_assignment == 10, torch.tensor(7, dtype=torch.int64), part_assignment)
+            part_assignment == 10,
+            torch.tensor(7, dtype=torch.int64, device=device), part_assignment)
         part_assignment = torch.where(
-            part_assignment == 11, torch.tensor(8, dtype=torch.int64), part_assignment)
+            part_assignment == 11,
+            torch.tensor(8, dtype=torch.int64, device=device), part_assignment)
 
         for i in range(self.body_model.num_joints):
             # Disable the rotation of toes separately from the feet
@@ -659,8 +747,9 @@ class SMPLFitter(nn.Module):
             part_assignment)
 
         j = (self.body_model.J_template +
-             torch.einsum('jcs,...s->...jc', self.body_model.J_shapedirs[:, :, :self.n_betas],
-                          shape_betas))
+             torch.einsum(
+                 'jcs,...s->...jc', self.body_model.J_shapedirs[:, :, :self.n_betas],
+                 shape_betas[:, :self.n_betas]))
         if kid_factor is not None:
             j += torch.einsum('jc,...->...jc', self.body_model.kid_J_shapedir, kid_factor)
 

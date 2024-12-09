@@ -11,25 +11,27 @@ class SMPLBodyModel(nn.Module):
     """
     Represents a statistical body model of the SMPL family.
 
-    The SMPL (Skinned Multi-Person Linear) model provides a way to represent articulated 3D human meshes through a compact shape vector (beta) and pose (body part rotation) parameters.
+    The SMPL (Skinned Multi-Person Linear) model provides a way to represent articulated 3D human
+    meshes through a compact shape vector (beta) and pose (body part rotation) parameters.
 
     Parameters:
         model_name (str, optional): Name of the model type, typically 'smpl'. Default is 'smpl'.
-        gender (str, optional): Gender of the model, which can be 'neutral', 'f' (female), or 'm' (male). Default is 'neutral'.
-        model_root (str, optional): Path to the directory containing model files. By default, {DATA_ROOT}/body_models/{model_name} is used, with the DATA_ROOT environment variable.
+        gender (str, optional): Gender of the model, which can be 'neutral', 'f' (female),
+        or 'm' (male). Default is 'neutral'.
+        model_root (str, optional): Path to the directory containing model files. By default,
+        {DATA_ROOT}/body_models/{model_name} is used, with the DATA_ROOT environment variable.
     """
 
-    def __init__(self, model_name='smpl', gender='neutral', model_root=None):
+    def __init__(self, model_name='smpl', gender='neutral', model_root=None, unit='m', num_betas=None):
         super().__init__()
         self.gender = gender
         self.model_name = model_name
-        tensors, nontensors = smplfitter.common.initialize(model_name, gender, model_root)
+        tensors, nontensors = smplfitter.common.initialize(model_name, gender, model_root, num_betas)
 
         # Register buffers and parameters
         self.register_buffer('v_template', torch.tensor(tensors['v_template'], dtype=torch.float32))
         self.register_buffer('shapedirs', torch.tensor(tensors['shapedirs'], dtype=torch.float32))
         self.register_buffer('posedirs', torch.tensor(tensors['posedirs'], dtype=torch.float32))
-        self.register_buffer('v_dirs', torch.tensor(tensors['v_dirs'], dtype=torch.float32))
         self.register_buffer('J_regressor',
                              torch.tensor(tensors['J_regressor'], dtype=torch.float32))
         self.register_buffer('J_template', torch.tensor(tensors['J_template'], dtype=torch.float32))
@@ -47,6 +49,7 @@ class SMPLBodyModel(nn.Module):
         self.faces = nontensors['faces']
         self.num_joints = nontensors['num_joints']
         self.num_vertices = nontensors['num_vertices']
+        self.unit_factor = dict(mm=1000, cm=100, m=1)[unit]
 
     def forward(
             self,
@@ -59,25 +62,38 @@ class SMPLBodyModel(nn.Module):
             return_vertices: bool = True
     ) -> Dict[str, torch.Tensor]:
         """
-        Calculate the body model vertices, joint positions, and orientations for a batch of instances given the input pose, shape, and translation parameters. The rotation may be specified as one of three options:
+        Calculate the body model vertices, joint positions, and orientations for a batch of
+        instances given the input pose, shape, and translation parameters. The rotation may be
+        specified as one of three options:
           * parent-relative rotation vectors,
           * parent-relative rotation matrices, or
           * global rotation matrices
 
         Parameters:
-            pose_rotvecs (Optional[torch.Tensor]): Rotation vectors per joint, shaped as (batch_size, num_joints, 3) or flattened as (batch_size, num_joints * 3).
-            shape_betas (Optional[torch.Tensor]): Shape coefficients (betas) for the body shape, shaped as (batch_size, num_betas).
-            trans (Optional[torch.Tensor]): Translation vector to apply after posing, shaped as (batch_size, 3).
-            kid_factor (Optional[torch.Tensor]): Adjustment factor for child shapes, shaped as (batch_size, 1). Default is None.
-            rel_rotmats (Optional[torch.Tensor]): Parent-relative rotation matrices per joint, shaped as (batch_size, num_joints, 3, 3).
-            glob_rotmats (Optional[torch.Tensor]): Global rotation matrices per joint, shaped as (batch_size, num_joints, 3, 3).
-            return_vertices (bool): Flag indicating whether to compute and return the body model vertices. Default is True. If only joints and orientations are needed, setting this to False is faster.
+            pose_rotvecs (Optional[torch.Tensor]): Rotation vectors per joint, shaped as (
+            batch_size, num_joints, 3) or flattened as (batch_size, num_joints * 3).
+            shape_betas (Optional[torch.Tensor]): Shape coefficients (betas) for the body shape,
+            shaped as (batch_size, num_betas).
+            trans (Optional[torch.Tensor]): Translation vector to apply after posing, shaped as (
+            batch_size, 3).
+            kid_factor (Optional[torch.Tensor]): Adjustment factor for child shapes, shaped as (
+            batch_size, 1). Default is None.
+            rel_rotmats (Optional[torch.Tensor]): Parent-relative rotation matrices per joint,
+            shaped as (batch_size, num_joints, 3, 3).
+            glob_rotmats (Optional[torch.Tensor]): Global rotation matrices per joint, shaped as
+            (batch_size, num_joints, 3, 3).
+            return_vertices (bool): Flag indicating whether to compute and return the body model
+            vertices. Default is True. If only joints and orientations are needed, setting this
+            to False is faster.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing:
-                - 'vertices' (torch.Tensor): 3D body model vertices, shaped as (batch_size, num_vertices, 3), if `return_vertices` is True.
-                - 'joints' (torch.Tensor): 3D joint positions, shaped as (batch_size, num_joints, 3).
-                - 'orientations' (torch.Tensor): Global orientation matrices for each joint, shaped as (batch_size, num_joints, 3, 3).
+                - 'vertices' (torch.Tensor): 3D body model vertices, shaped as (batch_size,
+                num_vertices, 3), if `return_vertices` is True.
+                - 'joints' (torch.Tensor): 3D joint positions, shaped as (batch_size, num_joints,
+                3).
+                - 'orientations' (torch.Tensor): Global orientation matrices for each joint,
+                shaped as (batch_size, num_joints, 3, 3).
         """
 
         batch_size = 0
@@ -141,7 +157,9 @@ class SMPLBodyModel(nn.Module):
             (1, 3), dtype=torch.float32, device=device) if trans is None else trans.float()
 
         if not return_vertices:
-            return dict(joints=glob_positions + trans[:, None], orientations=glob_rotmats)
+            return dict(
+                joints=(glob_positions + trans[:, None]) * self.unit_factor,
+                orientations=glob_rotmats)
 
         pose_feature = rel_rotmats[:, 1:].reshape(-1, (self.num_joints - 1) * 3 * 3)
         v_posed = (
@@ -157,8 +175,8 @@ class SMPLBodyModel(nn.Module):
                 self.weights @ translations)
 
         return dict(
-            joints=glob_positions + trans[:, None],
-            vertices=vertices + trans[:, None],
+            joints=(glob_positions + trans[:, None]) * self.unit_factor,
+            vertices=(vertices + trans[:, None]) * self.unit_factor,
             orientations=glob_rotmats)
 
     @torch.jit.export
@@ -173,25 +191,37 @@ class SMPLBodyModel(nn.Module):
             return_vertices: bool = True
     ) -> Dict[str, torch.Tensor]:
         """
-        Calculate the body model vertices, joint positions, and orientations for a single instance given the input pose, shape, and translation parameters. The rotation may be specified as one of three options:
+        Calculate the body model vertices, joint positions, and orientations for a single
+        instance given the input pose, shape, and translation parameters. The rotation may be
+        specified as one of three options:
           * parent-relative rotation vectors,
           * parent-relative rotation matrices, or
           * global rotation matrices
 
         Parameters:
-            pose_rotvecs (Optional[torch.Tensor]): Rotation vectors per joint, shaped as (num_joints, 3) or (num_joints * 3,).
-            shape_betas (Optional[torch.Tensor]): Shape coefficients (betas) for the body shape, shaped as (num_betas,).
-            trans (Optional[torch.Tensor]): Translation vector to apply after posing, shaped as (3,).
-            kid_factor (Optional[torch.Tensor]): Adjustment factor for child shapes, shaped as (1,). Default is None.
-            rel_rotmats (Optional[torch.Tensor]): Parent-relative rotation matrices per joint, shaped as (num_joints, 3, 3).
-            glob_rotmats (Optional[torch.Tensor]): Global rotation matrices per joint, shaped as (num_joints, 3, 3).
-            return_vertices (bool): Flag indicating whether to compute and return the body model vertices. Default is True. If only joints and orientations are needed, False is much faster.
+            pose_rotvecs (Optional[torch.Tensor]): Rotation vectors per joint, shaped as (
+            num_joints, 3) or (num_joints * 3,).
+            shape_betas (Optional[torch.Tensor]): Shape coefficients (betas) for the body shape,
+            shaped as (num_betas,).
+            trans (Optional[torch.Tensor]): Translation vector to apply after posing, shaped as (
+            3,).
+            kid_factor (Optional[torch.Tensor]): Adjustment factor for child shapes, shaped as (
+            1,). Default is None.
+            rel_rotmats (Optional[torch.Tensor]): Parent-relative rotation matrices per joint,
+            shaped as (num_joints, 3, 3).
+            glob_rotmats (Optional[torch.Tensor]): Global rotation matrices per joint, shaped as
+            (num_joints, 3, 3).
+            return_vertices (bool): Flag indicating whether to compute and return the body model
+            vertices. Default is True. If only joints and orientations are needed, False is much
+            faster.
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing:
-                - 'vertices' (torch.Tensor): 3D body model vertices, shaped as (num_vertices, 3), if `return_vertices` is True.
+                - 'vertices' (torch.Tensor): 3D body model vertices, shaped as (num_vertices, 3),
+                if `return_vertices` is True.
                 - 'joints' (torch.Tensor): 3D joint positions, shaped as (num_joints, 3).
-                - 'orientations' (torch.Tensor): Global orientation matrices for each joint, shaped as (num_joints, 3, 3).
+                - 'orientations' (torch.Tensor): Global orientation matrices for each joint,
+                shaped as (num_joints, 3, 3).
         """
 
         # Add batch dimension by unsqueezing to shape (1, ...)
@@ -238,22 +268,29 @@ class SMPLBodyModel(nn.Module):
         Parameters:
             R (torch.Tensor): Rotation matrix, shaped as (3, 3).
             t (torch.Tensor): Translation vector, shaped as (3,).
-            pose_rotvecs (torch.Tensor): Initial rotation vectors per joint, shaped as (num_joints * 3,).
-            shape_betas (torch.Tensor): Shape coefficients (betas) for body shape, shaped as (num_betas,).
+            pose_rotvecs (torch.Tensor): Initial rotation vectors per joint, shaped as (
+            num_joints * 3,).
+            shape_betas (torch.Tensor): Shape coefficients (betas) for body shape, shaped as (
+            num_betas,).
             trans (torch.Tensor): Initial translation vector, shaped as (3,).
-            kid_factor (Optional[torch.Tensor]): Optional in case of kid shapes like in AGORA. Shaped as (1,). Default is None.
+            kid_factor (Optional[torch.Tensor]): Optional in case of kid shapes like in AGORA.
+            Shaped as (1,). Default is None.
             post_translate (bool): Flag indicating whether to apply the translation after rotation.
                 If True, `t` is added after rotation by `R`; if False, `t` is subtracted before
                 rotation by `R`. Default is True.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: A tuple containing:
-                - `new_pose_rotvec` (torch.Tensor): Updated pose rotation vectors, shaped as (num_joints * 3,).
+                - `new_pose_rotvec` (torch.Tensor): Updated pose rotation vectors, shaped as (
+                num_joints * 3,).
                 - `new_trans` (torch.Tensor): Updated translation vector, shaped as (3,).
 
         Notes:
-            Rotating a parametric representation is nontrivial because the global orientation (first three rotation parameters) perform the rotation around the pelvis joint instad of the origin of the canonical coordinate system.
-            This method takes into accound the offset between the pelvis joint in the shaped T-pose and the origin of the canonical coordinate system.
+            Rotating a parametric representation is nontrivial because the global orientation (
+            first three rotation parameters) perform the rotation around the pelvis joint instad
+            of the origin of the canonical coordinate system.
+            This method takes into accound the offset between the pelvis joint in the shaped
+            T-pose and the origin of the canonical coordinate system.
 
         """
         current_rotmat = rotvec2mat(pose_rotvecs[:3])
@@ -265,6 +302,8 @@ class SMPLBodyModel(nn.Module):
                 + self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas)
         if kid_factor is not None:
             pelvis += self.kid_J_shapedir[0] * kid_factor
+
+        pelvis *= self.unit_factor
 
         eye3 = torch.eye(3, device=R.device, dtype=R.dtype)
         if post_translate:
