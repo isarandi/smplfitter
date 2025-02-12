@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smplfitter"
+version = "0.2.0"
+description = "Inverse kinematics solver and body shape fitter for SMPL-family body models, including a reimplementation of these body models for NumPy, PyTorch and TensorFlow"
+authors = [
+    { name = "István Sárándi", email = "istvan.sarandi@uni-tuebingen.de" }
+]
+readme = "README.md"
+requires-python = ">=3.6"
+license = { file = "LICENSE" }
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "chumpy"
+]
+
+[project.optional-dependencies]
+tensorflow = ["tensorflow"]
+pytorch = ["torch"]
+
+#[tool.setuptools]
+#packages = ["smplfitter", "smplfitter.np", "smplfitter.pt", "smplfitter.tf"]
+#package-dir = { "" = "src" }
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 99
+skip-string-normalization = true
