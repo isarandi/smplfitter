@@ -1,0 +1,64 @@
+@import url("theme.css");
+@import url("https://fonts.googleapis.com/css2?family=Mona+Sans:ital,wght@0,200..900;1,200..900&family=Geist:wght@100..900&&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Outfit:wght@100..900&display=swap");
+
+@media (min-width: 960px) {
+    .bd-page-width {
+        max-width: 120rem;
+    }
+}
+
+#rtd-footer-container {
+    margin-top: 0 !important;
+}
+
+html[data-theme="light"] {
+    --pst-color-table-row-hover-bg: #dfc6ff;
+    --pst-color-link-hover: #845818;
+}
+
+html[data-theme="dark"] {
+    --pst-color-table-row-hover-bg: #41296c;
+    --pst-color-inline-code: #dd8cd4;
+}
+
+
+html[data-theme="dark"] dt:target {
+    background-color: #4f4500;
+}
+
+html[data-theme="dark"] .linkcode-link {
+    color: #9090ff;
+}
+
+html[data-theme="dark"] table.indextable tr.cap {
+    background-color: #464646;
+}
+
+html[data-theme="dark"] a:visited {
+    color: #9E67D0;
+}
+
+.navbar-brand .logo__title {
+    font-family: "Mona Sans", sans-serif;
+    font-size: 2.5rem;
+    font-weight: 400;
+    font-style: normal;
+}
+
+:root {
+    --pst-font-family-monospace: "JetBrains Mono", monospace;
+    --pst-font-family-heading: "Mona Sans", sans-serif;
+    --pst-font-family-base: "Mona Sans", sans-serif;
+}
+
+body {
+    font-weight: 450;
+}
+
+.bd-main .bd-content .bd-article-container {
+  max-width: 100%;  /* default is 60em */
+}
+
+.bd-sidebar-primary {
+    width: 15%;
+}
