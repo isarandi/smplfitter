@@ -27,7 +27,8 @@ class BodyModel:
         self.gender = gender
         self.model_name = model_name
         tensors, nontensors = smplfitter.common.initialize(
-            model_name, gender, model_root, num_betas)
+            model_name, gender, model_root, num_betas
+        )
         self.v_template = np.array(tensors['v_template'], np.float32)
         self.shapedirs = np.array(tensors['shapedirs'], np.float32)
         self.posedirs = np.array(tensors['posedirs'], np.float32)
@@ -43,15 +44,16 @@ class BodyModel:
         self.num_vertices = nontensors['num_vertices']
 
     def __call__(
-            self,
-            pose_rotvecs: Optional[np.ndarray] = None,
-            shape_betas: Optional[np.ndarray] = None,
-            trans: Optional[np.ndarray] = None,
-            kid_factor: Optional[np.ndarray] = None,
-            rel_rotmats: Optional[np.ndarray] = None,
-            glob_rotmats: Optional[np.ndarray] = None,
-            *,
-            return_vertices: bool = True):
+        self,
+        pose_rotvecs: Optional[np.ndarray] = None,
+        shape_betas: Optional[np.ndarray] = None,
+        trans: Optional[np.ndarray] = None,
+        kid_factor: Optional[np.ndarray] = None,
+        rel_rotmats: Optional[np.ndarray] = None,
+        glob_rotmats: Optional[np.ndarray] = None,
+        *,
+        return_vertices: bool = True,
+    ):
         """
         Calculates the body model vertices, joint positions, and orientations for a batch of
         instances given the input pose, shape, and translation parameters. The rotation may be
@@ -91,8 +93,7 @@ class BodyModel:
             pose_rotvecs = np.asarray(pose_rotvecs, np.float32)
             rel_rotmats = rotvec2mat(np.reshape(pose_rotvecs, (batch_size, self.num_joints, 3)))
         elif glob_rotmats is None:
-            rel_rotmats = np.tile(
-                np.eye(3, dtype=np.float32), [batch_size, self.num_joints, 1, 1])
+            rel_rotmats = np.tile(np.eye(3, dtype=np.float32), [batch_size, self.num_joints, 1, 1])
 
         if glob_rotmats is None:
             glob_rotmats = [rel_rotmats[:, 0]]
@@ -102,9 +103,13 @@ class BodyModel:
             glob_rotmats = np.stack(glob_rotmats, axis=1)
 
         parent_indices = self.kintree_parents[1:]
-        parent_glob_rotmats = np.concatenate([
-            np.tile(np.eye(3), [glob_rotmats.shape[0], 1, 1, 1]),
-            glob_rotmats[:, parent_indices]], axis=1)
+        parent_glob_rotmats = np.concatenate(
+            [
+                np.tile(np.eye(3), [glob_rotmats.shape[0], 1, 1, 1]),
+                glob_rotmats[:, parent_indices],
+            ],
+            axis=1,
+        )
 
         if rel_rotmats is None:
             rel_rotmats = matmul_transp_a(parent_glob_rotmats, glob_rotmats)
@@ -120,11 +125,13 @@ class BodyModel:
         else:
             kid_factor = np.float32(kid_factor)
 
-        j = (self.J_template +
-             np.einsum(
-                 'jcs,bs->bjc', self.J_shapedirs[:, :, :num_betas],
-                 shape_betas[:, :num_betas]) +
-             np.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor))
+        j = (
+            self.J_template
+            + np.einsum(
+                'jcs,bs->bjc', self.J_shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]
+            )
+            + np.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor)
+        )
 
         glob_rotmats = [rel_rotmats[:, 0]]
         glob_positions = [j[:, 0]]
@@ -133,8 +140,9 @@ class BodyModel:
             i_parent = self.kintree_parents[i_joint]
             glob_rotmats.append(glob_rotmats[i_parent] @ rel_rotmats[:, i_joint])
             glob_positions.append(
-                glob_positions[i_parent] +
-                np.einsum('bCc,bc->bC', glob_rotmats[i_parent], j[:, i_joint] - j[:, i_parent]))
+                glob_positions[i_parent]
+                + np.einsum('bCc,bc->bC', glob_rotmats[i_parent], j[:, i_joint] - j[:, i_parent])
+            )
 
         glob_rotmats = np.stack(glob_rotmats, axis=1)
         glob_positions = np.stack(glob_positions, axis=1)
@@ -145,27 +153,29 @@ class BodyModel:
             trans = trans.astype(np.float32)
 
         if not return_vertices:
-            return dict(
-                joints=(glob_positions + trans[:, np.newaxis]),
-                orientations=glob_rotmats)
+            return dict(joints=(glob_positions + trans[:, np.newaxis]), orientations=glob_rotmats)
 
         pose_feature = np.reshape(rel_rotmats[:, 1:], [-1, (self.num_joints - 1) * 3 * 3])
         v_posed = (
-                self.v_template +
-                np.einsum(
-                    'vcp,bp->bvc', self.shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]) +
-                np.einsum('vcp,bp->bvc', self.posedirs, pose_feature) +
-                np.einsum('vc,b->bvc', self.kid_shapedir, kid_factor))
+            self.v_template
+            + np.einsum(
+                'vcp,bp->bvc', self.shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]
+            )
+            + np.einsum('vcp,bp->bvc', self.posedirs, pose_feature)
+            + np.einsum('vc,b->bvc', self.kid_shapedir, kid_factor)
+        )
 
         translations = glob_positions - np.einsum('bjCc,bjc->bjC', glob_rotmats, j)
         vertices = (
-                np.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed) +
-                self.weights @ translations)
+            np.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed)
+            + self.weights @ translations
+        )
 
         return dict(
             vertices=vertices + trans[:, np.newaxis],
             joints=glob_positions + trans[:, np.newaxis],
-            orientations=glob_rotmats)
+            orientations=glob_rotmats,
+        )
 
     def single(self, *args, return_vertices=True, **kwargs):
         """
@@ -203,7 +213,7 @@ class BodyModel:
         return {k: np.squeeze(v, axis=0) for k, v in result.items()}
 
     def rototranslate(
-            self, R, t, pose_rotvecs, shape_betas, trans, kid_factor=0, post_translate=True
+        self, R, t, pose_rotvecs, shape_betas, trans, kid_factor=0, post_translate=True
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Rotates and translates the body in parametric form.
@@ -243,13 +253,13 @@ class BodyModel:
         """
         current_rotmat = rotvec2mat(pose_rotvecs[:3])
         new_rotmat = R @ current_rotmat
-        new_pose_rotvec = np.concatenate(
-            [mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)
+        new_pose_rotvec = np.concatenate([mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)
 
         pelvis = (
-                self.J_template[0] +
-                self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
-                self.kid_J_shapedir[0] * kid_factor)
+            self.J_template[0]
+            + self.J_shapedirs[0, :, : shape_betas.shape[0]] @ shape_betas
+            + self.kid_J_shapedir[0] * kid_factor
+        )
 
         if post_translate:
             new_trans = pelvis @ (R.T - np.eye(3)) + trans @ R.T + t
@@ -260,13 +270,16 @@ class BodyModel:
 
 def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats):
     batch_sizes = [
-        np.asarray(x).shape[0] for x in [pose_rotvecs, shape_betas, trans, rel_rotmats]
-        if x is not None]
+        np.asarray(x).shape[0]
+        for x in [pose_rotvecs, shape_betas, trans, rel_rotmats]
+        if x is not None
+    ]
 
     if len(batch_sizes) == 0:
         raise RuntimeError(
             'At least one argument must be given among pose_rotvecs, shape_betas, trans, '
-            'rel_rotmats.')
+            'rel_rotmats.'
+        )
 
     if not all(b == batch_sizes[0] for b in batch_sizes[1:]):
         raise RuntimeError('The batch sizes must be equal.')

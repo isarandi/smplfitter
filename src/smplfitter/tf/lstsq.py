@@ -33,7 +33,8 @@ def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, n_shared=0):
     matrix = tf.concat([matrix, tf.eye(n_params, batch_shape=[tf.shape(matrix)[0]])], axis=1)
     rhs = tf.pad(rhs, [[0, 0], [0, n_params], [0, 0]])
     weights = tf.concat(
-        [weights, tf.repeat(l2_regularizer[tf.newaxis], tf.shape(matrix)[0], axis=0)], axis=1)
+        [weights, tf.repeat(l2_regularizer[tf.newaxis], tf.shape(matrix)[0], axis=0)], axis=1
+    )
 
     # Split the shared and independent parts of the matrices
     matrix_shared, matrix_indep = tf.split(matrix, [n_shared, n_indep], axis=-1)
@@ -46,12 +47,17 @@ def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, n_shared=0):
     # unaccounted for so far.
     coeff_indep2shared, coeff_indep2rhs = tf.split(
         lstsq(matrix_indep, tf.concat([matrix_shared, rhs], axis=-1), weights),
-        [n_shared, n_rhs_outputs], axis=-1)
+        [n_shared, n_rhs_outputs],
+        axis=-1,
+    )
 
     # Now solve for the shared params using the residuals
     coeff_shared2rhs = lstsq(
         matrix_shared - matrix_indep @ coeff_indep2shared,
-        rhs - matrix_indep @ coeff_indep2rhs, weights, shared=True)
+        rhs - matrix_indep @ coeff_indep2rhs,
+        weights,
+        shared=True,
+    )
 
     # Finally, update the estimate for the independent params
     coeff_indep2rhs = coeff_indep2rhs - coeff_indep2shared @ coeff_shared2rhs

@@ -26,9 +26,13 @@ class BodyFitter:
     """
 
     def __init__(
-            self, body_model: 'smplfitter.tf.BodyModel',
-            num_betas: int = 10, enable_kid: bool = False,
-            vertex_subset=None, joint_regressor=None):
+        self,
+        body_model: 'smplfitter.tf.BodyModel',
+        num_betas: int = 10,
+        enable_kid: bool = False,
+        vertex_subset=None,
+        joint_regressor=None,
+    ):
 
         self.body_model = body_model
         self.n_betas = num_betas
@@ -39,13 +43,17 @@ class BodyFitter:
 
         self.vertex_subset = vertex_subset
         self.default_mesh_tf = tf.gather(
-            body_model.single()['vertices'], self.vertex_subset, axis=0)
+            body_model.single()['vertices'], self.vertex_subset, axis=0
+        )
 
         self.J_template_ext = tf.concat(
-            [tf.reshape(body_model.J_template, [-1, 3, 1]),
-             body_model.J_shapedirs[:, :, :self.n_betas]] +
-            ([tf.reshape(body_model.kid_J_shapedir, [-1, 3, 1])] if enable_kid else []),
-            axis=2)
+            [
+                tf.reshape(body_model.J_template, [-1, 3, 1]),
+                body_model.J_shapedirs[:, :, : self.n_betas],
+            ]
+            + ([tf.reshape(body_model.kid_J_shapedir, [-1, 3, 1])] if enable_kid else []),
+            axis=2,
+        )
 
         self.children_and_self = [[i_joint] for i_joint in range(body_model.num_joints)]
         for i_joint in range(1, body_model.num_joints):
@@ -69,22 +77,23 @@ class BodyFitter:
             self.J_regressor = body_model.J_regressor
 
     def fit(
-            self,
-            target_vertices: tf.Tensor,
-            target_joints: Optional[tf.Tensor] = None,
-            vertex_weights: Optional[tf.Tensor] = None,
-            joint_weights: Optional[tf.Tensor] = None,
-            num_iter: int = 1,
-            beta_regularizer: float = 1,
-            beta_regularizer2: float = 0,
-            scale_regularizer: float = 0,
-            kid_regularizer: Optional[float] = None,
-            share_beta: bool = False,
-            final_adjust_rots: bool = True,
-            scale_target: bool = False,
-            scale_fit: bool = False,
-            allow_nan: bool = False,
-            requested_keys=()):
+        self,
+        target_vertices: tf.Tensor,
+        target_joints: Optional[tf.Tensor] = None,
+        vertex_weights: Optional[tf.Tensor] = None,
+        joint_weights: Optional[tf.Tensor] = None,
+        num_iter: int = 1,
+        beta_regularizer: float = 1,
+        beta_regularizer2: float = 0,
+        scale_regularizer: float = 0,
+        kid_regularizer: Optional[float] = None,
+        share_beta: bool = False,
+        final_adjust_rots: bool = True,
+        scale_target: bool = False,
+        scale_fit: bool = False,
+        allow_nan: bool = False,
+        requested_keys=(),
+    ):
         """
         Fits the body model to target vertices and optionally joints by optimizing for shape and
         pose, and optionally others.
@@ -139,7 +148,8 @@ class BodyFitter:
             target_vertices = target_vertices - target_mean[:, tf.newaxis]
         else:
             target_mean = tf.reduce_mean(
-                tf.concat([target_vertices, target_joints], axis=1), axis=1)
+                tf.concat([target_vertices, target_joints], axis=1), axis=1
+            )
             target_vertices = target_vertices - target_mean[:, tf.newaxis]
             target_joints = target_joints - target_mean[:, tf.newaxis]
 
@@ -147,35 +157,76 @@ class BodyFitter:
         initial_vertices = self.default_mesh_tf[tf.newaxis]
 
         glob_rotmats = self.fit_global_rotations(
-            target_vertices, target_joints, initial_vertices, initial_joints, vertex_weights,
-            joint_weights)
+            target_vertices,
+            target_joints,
+            initial_vertices,
+            initial_joints,
+            vertex_weights,
+            joint_weights,
+        )
 
         for i in range(num_iter - 1):
+
             result = self.fit_shape(
-                glob_rotmats, target_vertices, target_joints, vertex_weights, joint_weights,
-                beta_regularizer, beta_regularizer2, scale_regularizer=0,
-                kid_regularizer=kid_regularizer, share_beta=share_beta,
-                scale_target=False, scale_fit=False,
-                requested_keys=['vertices'] + (['joints'] if target_joints is not None else []))
-            glob_rotmats = self.fit_global_rotations(
-                target_vertices, target_joints, result['vertices'], result['joints'],
-                vertex_weights, joint_weights) @ glob_rotmats
+                glob_rotmats,
+                target_vertices,
+                target_joints,
+                vertex_weights,
+                joint_weights,
+                beta_regularizer,
+                beta_regularizer2,
+                scale_regularizer=0,
+                kid_regularizer=kid_regularizer,
+                share_beta=share_beta,
+                scale_target=False,
+                scale_fit=False,
+                requested_keys=['vertices'] + (['joints'] if target_joints is not None else []),
+            )
+            glob_rotmats = (
+                self.fit_global_rotations(
+                    target_vertices,
+                    target_joints,
+                    result['vertices'],
+                    result['joints'],
+                    vertex_weights,
+                    joint_weights,
+                )
+                @ glob_rotmats
+            )
 
         result = self.fit_shape(
-            glob_rotmats, target_vertices, target_joints, vertex_weights, joint_weights,
-            beta_regularizer, beta_regularizer2, scale_regularizer, kid_regularizer, share_beta,
-            scale_target, scale_fit,
-            requested_keys=['vertices'] + (
-                ['joints'] if target_joints is not None or final_adjust_rots else []))
+            glob_rotmats,
+            target_vertices,
+            target_joints,
+            vertex_weights,
+            joint_weights,
+            beta_regularizer,
+            beta_regularizer2,
+            scale_regularizer,
+            kid_regularizer,
+            share_beta,
+            scale_target,
+            scale_fit,
+            requested_keys=['vertices']
+            + (['joints'] if target_joints is not None or final_adjust_rots else []),
+        )
 
         if final_adjust_rots:
             if scale_target:
                 factor = result['scale_corr'][:, tf.newaxis, tf.newaxis]
                 glob_rotmats = self.fit_global_rotations_dependent(
-                    target_vertices * factor, target_joints * factor, result['vertices'],
+                    target_vertices * factor,
+                    target_joints * factor,
+                    result['vertices'],
                     result['joints'],
-                    vertex_weights, joint_weights, glob_rotmats, result['shape_betas'],
-                    None, result['kid_factor'], result['trans'])
+                    vertex_weights,
+                    joint_weights,
+                    glob_rotmats,
+                    result['shape_betas'],
+                    None,
+                    result['kid_factor'],
+                    result['trans'],
+                )
             elif scale_fit:
                 factor = result['scale_corr'][:, tf.newaxis, tf.newaxis]
 
@@ -183,21 +234,40 @@ class BodyFitter:
                     return factor * x + (1 - factor) * tf.expand_dims(result['trans'], -2)
 
                 glob_rotmats = self.fit_global_rotations_dependent(
-                    target_vertices, target_joints, scale_adjust(result['vertices']),
-                    scale_adjust(result['joints']), vertex_weights, joint_weights,
-                    glob_rotmats, result['shape_betas'], result['scale_corr'], result['kid_factor'],
-                    result['trans'])
+                    target_vertices,
+                    target_joints,
+                    scale_adjust(result['vertices']),
+                    scale_adjust(result['joints']),
+                    vertex_weights,
+                    joint_weights,
+                    glob_rotmats,
+                    result['shape_betas'],
+                    result['scale_corr'],
+                    result['kid_factor'],
+                    result['trans'],
+                )
             else:
                 glob_rotmats = self.fit_global_rotations_dependent(
-                    target_vertices, target_joints, result['vertices'], result['joints'],
+                    target_vertices,
+                    target_joints,
+                    result['vertices'],
+                    result['joints'],
                     vertex_weights,
-                    joint_weights, glob_rotmats, result['shape_betas'], None, result['kid_factor'],
-                    result['trans'])
+                    joint_weights,
+                    glob_rotmats,
+                    result['shape_betas'],
+                    None,
+                    result['kid_factor'],
+                    result['trans'],
+                )
 
         if 'joints' in requested_keys or 'vertices' in requested_keys:
             forw = self.body_model(
-                glob_rotmats=glob_rotmats, shape_betas=result['shape_betas'], trans=result['trans'],
-                kid_factor=result['kid_factor'])
+                glob_rotmats=glob_rotmats,
+                shape_betas=result['shape_betas'],
+                trans=result['trans'],
+                kid_factor=result['kid_factor'],
+            )
 
         # Add the mean back
         result['trans'] = result['trans'] + target_mean
@@ -210,11 +280,16 @@ class BodyFitter:
 
         # Provide other requested rotation formats
         if 'relative_orientations' in requested_keys or 'pose_rotvecs' in requested_keys:
-            parent_glob_rotmats = tf.concat([
-                tf.broadcast_to(tf.eye(3), tf.shape(glob_rotmats[:, :1])),
-                tf.gather(glob_rotmats, self.body_model.kintree_parents[1:], axis=1)], axis=1)
+            parent_glob_rotmats = tf.concat(
+                [
+                    tf.broadcast_to(tf.eye(3), tf.shape(glob_rotmats[:, :1])),
+                    tf.gather(glob_rotmats, self.body_model.kintree_parents[1:], axis=1),
+                ],
+                axis=1,
+            )
             result['relative_orientations'] = tf.linalg.matmul(
-                parent_glob_rotmats, glob_rotmats, transpose_a=True)
+                parent_glob_rotmats, glob_rotmats, transpose_a=True
+            )
 
         if 'pose_rotvecs' in requested_keys:
             rotvecs = mat2rotvec(result['relative_orientations'])
@@ -225,44 +300,64 @@ class BodyFitter:
         return result
 
     def fit_shape(
-            self, glob_rotmats, target_vertices, target_joints=None, vertex_weights=None,
-            joint_weights=None, beta_regularizer=1, beta_regularizer2=0, scale_regularizer=0,
-            kid_regularizer=None, share_beta=False, scale_target=False, scale_fit=False,
-            requested_keys=()):
+        self,
+        glob_rotmats,
+        target_vertices,
+        target_joints=None,
+        vertex_weights=None,
+        joint_weights=None,
+        beta_regularizer=1,
+        beta_regularizer2=0,
+        scale_regularizer=0,
+        kid_regularizer=None,
+        share_beta=False,
+        scale_target=False,
+        scale_fit=False,
+        requested_keys=(),
+    ):
+
         if scale_target and scale_fit:
             raise ValueError("Only one of estim_scale_target and estim_scale_fit can be True")
 
         glob_rotmats = tf.cast(glob_rotmats, tf.float32)
         batch_size = tf.shape(target_vertices)[0]
 
-        parent_glob_rot_mats = tf.concat([
-            tf.broadcast_to(tf.eye(3), tf.shape(glob_rotmats[:, :1])),
-            tf.gather(glob_rotmats, self.body_model.kintree_parents[1:], axis=1)], axis=1)
+        parent_glob_rot_mats = tf.concat(
+            [
+                tf.broadcast_to(tf.eye(3), tf.shape(glob_rotmats[:, :1])),
+                tf.gather(glob_rotmats, self.body_model.kintree_parents[1:], axis=1),
+            ],
+            axis=1,
+        )
         rel_rotmats = tf.linalg.matmul(parent_glob_rot_mats, glob_rotmats, transpose_a=True)
 
         glob_positions_ext = [tf.repeat(self.J_template_ext[tf.newaxis, 0], batch_size, axis=0)]
         for i_joint, i_parent in enumerate(self.body_model.kintree_parents[1:], start=1):
             glob_positions_ext.append(
-                glob_positions_ext[i_parent] +
-                tf.einsum(
-                    'bCc,cs->bCs', glob_rotmats[:, i_parent],
-                    self.J_template_ext[i_joint] - self.J_template_ext[i_parent]))
+                glob_positions_ext[i_parent]
+                + tf.einsum(
+                    'bCc,cs->bCs',
+                    glob_rotmats[:, i_parent],
+                    self.J_template_ext[i_joint] - self.J_template_ext[i_parent],
+                )
+            )
         glob_positions_ext = tf.stack(glob_positions_ext, axis=1)
         translations_ext = glob_positions_ext - tf.einsum(
-            'bjCc,jcs->bjCs', glob_rotmats, self.J_template_ext)
+            'bjCc,jcs->bjCs', glob_rotmats, self.J_template_ext
+        )
 
         rot_params = tf.reshape(rel_rotmats[:, 1:], [-1, (self.body_model.num_joints - 1) * 3 * 3])
-        v_posed = self.v_template + tf.einsum(
-            'vcp,bp->bvc', self.posedirs, rot_params)
+        v_posed = self.v_template + tf.einsum('vcp,bp->bvc', self.posedirs, rot_params)
         v_rotated = tf.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed)
 
         shapedirs = (
-            tf.concat([
-                self.shapedirs[:, :, :self.n_betas],
-                self.kid_shapedir[:, :, tf.newaxis]], axis=2) if self.enable_kid
-            else self.shapedirs[:, :, :self.n_betas])
-        v_grad_rotated = tf.einsum(
-            'bjCc,lj,lcs->blCs', glob_rotmats, self.weights, shapedirs)
+            tf.concat(
+                [self.shapedirs[:, :, : self.n_betas], self.kid_shapedir[:, :, tf.newaxis]], axis=2
+            )
+            if self.enable_kid
+            else self.shapedirs[:, :, : self.n_betas]
+        )
+        v_grad_rotated = tf.einsum('bjCc,lj,lcs->blCs', glob_rotmats, self.weights, shapedirs)
 
         v_rotated_ext = tf.concat([v_rotated[:, :, :, tf.newaxis], v_grad_rotated], axis=3)
         v_translations_ext = tf.einsum('vj,bjcs->bvcs', self.weights, translations_ext)
@@ -276,7 +371,8 @@ class BodyFitter:
             target_both = tf.concat([target_vertices, target_joints], axis=1)
             pos_both = tf.concat([v_posed_posed_ext[..., 0], glob_positions_ext[..., 0]], axis=1)
             jac_pos_both = tf.concat(
-                [v_posed_posed_ext[..., 1:], glob_positions_ext[..., 1:]], axis=1)
+                [v_posed_posed_ext[..., 1:], glob_positions_ext[..., 1:]], axis=1
+            )
 
         if scale_target:
             A = tf.concat([jac_pos_both, -target_both[..., tf.newaxis]], axis=3)
@@ -299,19 +395,23 @@ class BodyFitter:
             weights = tf.ones(tf.shape(A)[:2], tf.float32)
 
         n_params = (
-                self.n_betas + (1 if self.enable_kid else 0) +
-                (1 if scale_target or scale_fit else 0))
+            self.n_betas + (1 if self.enable_kid else 0) + (1 if scale_target or scale_fit else 0)
+        )
         A = tf.reshape(A, [batch_size, -1, n_params])
         b = tf.reshape(b, [batch_size, -1, 1])
         w = tf.repeat(tf.reshape(weights, [batch_size, -1]), 3, axis=1)
         beta_regularizer = tf.convert_to_tensor(beta_regularizer, tf.float32)
-        beta_regularizer2 = tf.convert_to_tensor(beta_regularizer2,
-                                                 tf.float32)  # regul of first two
+        beta_regularizer2 = tf.convert_to_tensor(
+            beta_regularizer2, tf.float32
+        )  # regul of first two
 
-        l2_regularizer_all = tf.concat([
-            tf.fill([2], beta_regularizer2),
-            tf.fill([self.n_betas - 2], beta_regularizer),
-        ], axis=0)
+        l2_regularizer_all = tf.concat(
+            [
+                tf.fill([2], beta_regularizer2),
+                tf.fill([self.n_betas - 2], beta_regularizer),
+            ],
+            axis=0,
+        )
 
         if self.enable_kid:
             if kid_regularizer is None:
@@ -319,22 +419,26 @@ class BodyFitter:
             else:
                 kid_regularizer = tf.convert_to_tensor(kid_regularizer, tf.float32)
             l2_regularizer_all = tf.concat(
-                [l2_regularizer_all, kid_regularizer[tf.newaxis]], axis=0)
+                [l2_regularizer_all, kid_regularizer[tf.newaxis]], axis=0
+            )
 
         if scale_target or scale_fit:
             scale_regularizer = tf.convert_to_tensor(scale_regularizer, tf.float32)
             l2_regularizer_all = tf.concat(
-                [l2_regularizer_all, scale_regularizer[tf.newaxis]], axis=0)
+                [l2_regularizer_all, scale_regularizer[tf.newaxis]], axis=0
+            )
+
 
         if share_beta:
             x = lstsq_partial_share(
-                A, b, w, l2_regularizer_all, n_shared=self.n_betas + (1 if self.enable_kid else 0))
+                A, b, w, l2_regularizer_all, n_shared=self.n_betas + (1 if self.enable_kid else 0)
+            )
         else:
             x = lstsq(A, b, w, l2_regularizer_all)
 
         x = tf.squeeze(x, -1)
         new_trans = tf.squeeze(mean_b, 1) - tf.linalg.matvec(tf.squeeze(mean_A, 1), x)
-        new_shape = x[:, :self.n_betas]
+        new_shape = x[:, : self.n_betas]
         new_kid_factor = None
         new_scale_corr = None
 
@@ -346,29 +450,42 @@ class BodyFitter:
                 new_shape /= new_scale_corr[..., tf.newaxis]
 
         result = dict(
-            shape_betas=new_shape, kid_factor=new_kid_factor, trans=new_trans,
-            relative_orientations=rel_rotmats, joints=None, vertices=None,
-            scale_corr=new_scale_corr)
+            shape_betas=new_shape,
+            kid_factor=new_kid_factor,
+            trans=new_trans,
+            relative_orientations=rel_rotmats,
+            joints=None,
+            vertices=None,
+            scale_corr=new_scale_corr,
+        )
 
         if self.enable_kid:
             new_shape = tf.concat([new_shape, new_kid_factor[:, tf.newaxis]], axis=1)
 
         if 'joints' in requested_keys:
             result['joints'] = (
-                    glob_positions_ext[..., 0] +
-                    tf.einsum('bvcs,bs->bvc', glob_positions_ext[..., 1:], new_shape) +
-                    new_trans[:, tf.newaxis])
+                glob_positions_ext[..., 0]
+                + tf.einsum('bvcs,bs->bvc', glob_positions_ext[..., 1:], new_shape)
+                + new_trans[:, tf.newaxis]
+            )
 
         if 'vertices' in requested_keys:
             result['vertices'] = (
-                    v_posed_posed_ext[..., 0] +
-                    tf.einsum('bvcs,bs->bvc', v_posed_posed_ext[..., 1:], new_shape) +
-                    new_trans[:, tf.newaxis])
+                v_posed_posed_ext[..., 0]
+                + tf.einsum('bvcs,bs->bvc', v_posed_posed_ext[..., 1:], new_shape)
+                + new_trans[:, tf.newaxis]
+            )
         return result
 
     def fit_global_rotations(
-            self, target_vertices, target_joints, reference_vertices, reference_joints,
-            vertex_weights, joint_weights):
+        self,
+        target_vertices,
+        target_joints,
+        reference_vertices,
+        reference_joints,
+        vertex_weights,
+        joint_weights,
+    ):
         glob_rots = []
         mesh_weight = 1e-6
         joint_weight = 1 - mesh_weight
@@ -396,28 +513,37 @@ class BodyFitter:
             estim_body_part = tf.gather(target_vertices, selector, axis=1)
             weights_body_part = (
                 tf.gather(vertex_weights, selector, axis=1)[..., tf.newaxis] * mesh_weight
-                if vertex_weights is not None else mesh_weight)
+                if vertex_weights is not None
+                else mesh_weight
+            )
 
             default_joints = tf.gather(reference_joints, self.children_and_self[i], axis=1)
             estim_joints = tf.gather(target_joints, self.children_and_self[i], axis=1)
             weights_joints = (
-                tf.gather(joint_weights, self.children_and_self[i], axis=1)[
-                    ..., tf.newaxis] * joint_weight
-                if joint_weights is not None else joint_weight)
+                tf.gather(joint_weights, self.children_and_self[i], axis=1)[..., tf.newaxis]
+                * joint_weight
+                if joint_weights is not None
+                else joint_weight
+            )
 
-            body_part_mean_reference = tf.reduce_mean(
-                default_joints, axis=1, keepdims=True)
-            default_points = tf.concat([
-                (default_body_part - body_part_mean_reference) * weights_body_part,
-                (default_joints - body_part_mean_reference) * weights_joints], axis=1)
+            body_part_mean_reference = tf.reduce_mean(default_joints, axis=1, keepdims=True)
+            default_points = tf.concat(
+                [
+                    (default_body_part - body_part_mean_reference) * weights_body_part,
+                    (default_joints - body_part_mean_reference) * weights_joints,
+                ],
+                axis=1,
+            )
 
-            body_part_mean_target = tf.reduce_mean(
-                estim_joints, axis=1, keepdims=True)
+            body_part_mean_target = tf.reduce_mean(estim_joints, axis=1, keepdims=True)
 
-            estim_points = (
-                tf.concat([
+            estim_points = tf.concat(
+                [
                     (estim_body_part - body_part_mean_target),
-                    (estim_joints - body_part_mean_target)], axis=1))
+                    (estim_joints - body_part_mean_target),
+                ],
+                axis=1,
+            )
 
             glob_rot = kabsch(estim_points, default_points)
             glob_rots.append(glob_rot)
@@ -425,9 +551,19 @@ class BodyFitter:
         return tf.stack(glob_rots, axis=1)
 
     def fit_global_rotations_dependent(
-            self, target_vertices, target_joints, reference_vertices, reference_joints,
-            vertex_weights, joint_weights, glob_rots_prev, shape_betas, scale_corr, kid_factor,
-            trans):
+        self,
+        target_vertices,
+        target_joints,
+        reference_vertices,
+        reference_joints,
+        vertex_weights,
+        joint_weights,
+        glob_rots_prev,
+        shape_betas,
+        scale_corr,
+        kid_factor,
+        trans,
+    ):
         glob_rots = []
 
         true_reference_joints = reference_joints
@@ -439,18 +575,22 @@ class BodyFitter:
         part_assignment = tf.where(part_assignment == 10, tf.cast(7, tf.int64), part_assignment)
         part_assignment = tf.where(part_assignment == 11, tf.cast(8, tf.int64), part_assignment)
 
-        j = (self.body_model.J_template +
-             tf.einsum(
-                 'jcs,...s->...jc', self.body_model.J_shapedirs[:, :, :self.n_betas], shape_betas))
+        j = self.body_model.J_template + tf.einsum(
+            'jcs,...s->...jc', self.body_model.J_shapedirs[:, :, : self.n_betas], shape_betas
+        )
         if kid_factor is not None:
             j += tf.einsum('jc,...->...jc', self.body_model.kid_J_shapedir, kid_factor)
 
         if scale_corr is not None:
             j *= scale_corr[..., tf.newaxis, tf.newaxis]
 
-        j_parent = tf.concat([
-            tf.broadcast_to(tf.zeros(3), tf.shape(j[:, :1])),
-            tf.gather(j, self.body_model.kintree_parents[1:], axis=1)], axis=1)
+        j_parent = tf.concat(
+            [
+                tf.broadcast_to(tf.zeros(3), tf.shape(j[:, :1])),
+                tf.gather(j, self.body_model.kintree_parents[1:], axis=1),
+            ],
+            axis=1,
+        )
         bones = j - j_parent
 
         glob_positions = []
@@ -460,9 +600,9 @@ class BodyFitter:
                 glob_position = j[:, i] + trans
             else:
                 i_parent = self.body_model.kintree_parents[i]
-                glob_position = (
-                        glob_positions[i_parent] +
-                        tf.linalg.matvec(glob_rots[i_parent], bones[:, i]))
+                glob_position = glob_positions[i_parent] + tf.linalg.matvec(
+                    glob_rots[i_parent], bones[:, i]
+                )
             glob_positions.append(glob_position)
 
             if i == 10:
@@ -471,7 +611,7 @@ class BodyFitter:
             elif i == 11:
                 glob_rots.append(glob_rots[8])
                 continue
-            elif i not in [1,2,4,5,7,8,16,17,18,19]:
+            elif i not in [1, 2, 4, 5, 7, 8, 16, 17, 18, 19]:
                 glob_rots.append(glob_rots_prev[:, i])
                 continue
 
@@ -482,23 +622,30 @@ class BodyFitter:
             estim_body_part = tf.gather(target_vertices, vertex_selector, axis=1)
             weights_body_part = (
                 tf.gather(vertex_weights, vertex_selector, axis=1)[..., tf.newaxis]
-                if vertex_weights is not None else tf.constant(1, tf.float32))
+                if vertex_weights is not None
+                else tf.constant(1, tf.float32)
+            )
 
             default_joints = tf.gather(reference_joints, joint_selector, axis=1)
             estim_joints = tf.gather(target_joints, joint_selector, axis=1)
             weights_joints = (
                 tf.gather(joint_weights, joint_selector, axis=1)[..., tf.newaxis]
-                if joint_weights is not None else tf.constant(1, tf.float32))
+                if joint_weights is not None
+                else tf.constant(1, tf.float32)
+            )
 
             reference_point = glob_position[:, tf.newaxis]
-            default_reference_point = true_reference_joints[:, i:i + 1]
-            default_points = tf.concat([
-                (default_body_part - default_reference_point) * weights_body_part,
-                (default_joints - default_reference_point) * weights_joints], axis=1)
-            estim_points = (
-                tf.concat([
-                    (estim_body_part - reference_point),
-                    (estim_joints - reference_point)], axis=1))
+            default_reference_point = true_reference_joints[:, i : i + 1]
+            default_points = tf.concat(
+                [
+                    (default_body_part - default_reference_point) * weights_body_part,
+                    (default_joints - default_reference_point) * weights_joints,
+                ],
+                axis=1,
+            )
+            estim_points = tf.concat(
+                [(estim_body_part - reference_point), (estim_joints - reference_point)], axis=1
+            )
             glob_rot = kabsch(estim_points, default_points) @ glob_rots_prev[:, i]
             glob_rots.append(glob_rot)
 

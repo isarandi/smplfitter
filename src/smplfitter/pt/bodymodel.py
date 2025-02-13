@@ -44,34 +44,45 @@ class BodyModel(nn.Module):
     """
 
     def __init__(
-            self, model_name: str = 'smpl',
-            gender: str = 'neutral',
-            model_root: Optional[str] = None,
-            num_betas: Optional[int] = None):
+        self,
+        model_name: str = 'smpl',
+        gender: str = 'neutral',
+        model_root: Optional[str] = None,
+        num_betas: Optional[int] = None,
+    ):
         super().__init__()
         self.gender = gender
         self.model_name = model_name
         tensors, nontensors = smplfitter.common.initialize(
-            model_name, gender, model_root, num_betas)
+            model_name, gender, model_root, num_betas
+        )
 
         # Register buffers and parameters
-        self.register_buffer('v_template', torch.tensor(tensors['v_template'], dtype=torch.float32))
+        self.register_buffer(
+            'v_template', torch.tensor(tensors['v_template'], dtype=torch.float32)
+        )
         self.register_buffer('shapedirs', torch.tensor(tensors['shapedirs'], dtype=torch.float32))
         self.register_buffer('posedirs', torch.tensor(tensors['posedirs'], dtype=torch.float32))
         self.register_buffer(
-            'J_regressor',
-            torch.tensor(tensors['J_regressor'], dtype=torch.float32))
-        self.register_buffer('J_template', torch.tensor(tensors['J_template'], dtype=torch.float32))
+            'J_regressor', torch.tensor(tensors['J_regressor'], dtype=torch.float32)
+        )
         self.register_buffer(
-            'J_shapedirs', torch.tensor(tensors['J_shapedirs'], dtype=torch.float32))
+            'J_template', torch.tensor(tensors['J_template'], dtype=torch.float32)
+        )
         self.register_buffer(
-            'kid_shapedir', torch.tensor(tensors['kid_shapedir'], dtype=torch.float32))
+            'J_shapedirs', torch.tensor(tensors['J_shapedirs'], dtype=torch.float32)
+        )
         self.register_buffer(
-            'kid_J_shapedir', torch.tensor(tensors['kid_J_shapedir'], dtype=torch.float32))
+            'kid_shapedir', torch.tensor(tensors['kid_shapedir'], dtype=torch.float32)
+        )
+        self.register_buffer(
+            'kid_J_shapedir', torch.tensor(tensors['kid_J_shapedir'], dtype=torch.float32)
+        )
         self.register_buffer('weights', torch.tensor(tensors['weights'], dtype=torch.float32))
         self.register_buffer(
             'kintree_parents_tensor',
-            torch.tensor(nontensors['kintree_parents'], dtype=torch.int64))
+            torch.tensor(nontensors['kintree_parents'], dtype=torch.int64),
+        )
 
         self.kintree_parents = nontensors['kintree_parents']
         self.faces = nontensors['faces']
@@ -79,14 +90,14 @@ class BodyModel(nn.Module):
         self.num_vertices = nontensors['num_vertices']
 
     def forward(
-            self,
-            pose_rotvecs: Optional[torch.Tensor] = None,
-            shape_betas: Optional[torch.Tensor] = None,
-            trans: Optional[torch.Tensor] = None,
-            kid_factor: Optional[torch.Tensor] = None,
-            rel_rotmats: Optional[torch.Tensor] = None,
-            glob_rotmats: Optional[torch.Tensor] = None,
-            return_vertices: bool = True
+        self,
+        pose_rotvecs: Optional[torch.Tensor] = None,
+        shape_betas: Optional[torch.Tensor] = None,
+        trans: Optional[torch.Tensor] = None,
+        kid_factor: Optional[torch.Tensor] = None,
+        rel_rotmats: Optional[torch.Tensor] = None,
+        glob_rotmats: Optional[torch.Tensor] = None,
+        return_vertices: bool = True,
     ) -> dict[str, torch.Tensor]:
         """
         Calculates the body model vertices, joint positions, and orientations for a batch of
@@ -146,29 +157,40 @@ class BodyModel(nn.Module):
             glob_rotmats = torch.stack(glob_rotmats_, dim=1)
 
         parent_indices = self.kintree_parents_tensor[1:].to(glob_rotmats.device)
-        parent_glob_rotmats = torch.cat([
-            torch.eye(3, device=device).expand(glob_rotmats.shape[0], 1, 3, 3),
-            glob_rotmats.index_select(1, parent_indices)],
-            dim=1)
+        parent_glob_rotmats = torch.cat(
+            [
+                torch.eye(3, device=device).expand(glob_rotmats.shape[0], 1, 3, 3),
+                glob_rotmats.index_select(1, parent_indices),
+            ],
+            dim=1,
+        )
 
         if rel_rotmats is None:
             rel_rotmats = torch.matmul(parent_glob_rotmats.transpose(-1, -2), glob_rotmats)
 
-        shape_betas = shape_betas.float() if shape_betas is not None else torch.zeros(
-            (batch_size, 0), dtype=torch.float32, device=device)
+        shape_betas = (
+            shape_betas.float()
+            if shape_betas is not None
+            else torch.zeros((batch_size, 0), dtype=torch.float32, device=device)
+        )
         num_betas = min(shape_betas.shape[1], self.shapedirs.shape[2])
 
-        kid_factor = torch.zeros(
-            (1,), dtype=torch.float32, device=device) if kid_factor is None else torch.tensor(
-            kid_factor, dtype=torch.float32, device=device)
-        j = (self.J_template +
-             torch.einsum('jcs,bs->bjc', self.J_shapedirs[:, :, :num_betas],
-                          shape_betas[:, :num_betas]) +
-             torch.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor))
+        kid_factor = (
+            torch.zeros((1,), dtype=torch.float32, device=device)
+            if kid_factor is None
+            else torch.tensor(kid_factor, dtype=torch.float32, device=device)
+        )
+        j = (
+            self.J_template
+            + torch.einsum(
+                'jcs,bs->bjc', self.J_shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]
+            )
+            + torch.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor)
+        )
 
-        j_parent = torch.cat([
-            torch.zeros(3, device=device).expand(j.shape[0], 1, 3),
-            j[:, parent_indices]], dim=1)
+        j_parent = torch.cat(
+            [torch.zeros(3, device=device).expand(j.shape[0], 1, 3), j[:, parent_indices]], dim=1
+        )
         bones = j - j_parent
         rotated_bones = torch.einsum('bjCc,bjc->bjC', parent_glob_rotmats, bones)
 
@@ -178,40 +200,47 @@ class BodyModel(nn.Module):
             glob_positions.append(glob_positions[i_parent] + rotated_bones[:, i_joint])
         glob_positions = torch.stack(glob_positions, dim=1)
 
-        trans = torch.zeros(
-            (1, 3), dtype=torch.float32, device=device) if trans is None else trans.float()
+        trans = (
+            torch.zeros((1, 3), dtype=torch.float32, device=device)
+            if trans is None
+            else trans.float()
+        )
 
         if not return_vertices:
             return dict(joints=(glob_positions + trans[:, None]), orientations=glob_rotmats)
 
         pose_feature = rel_rotmats[:, 1:].reshape(-1, (self.num_joints - 1) * 3 * 3)
         v_posed = (
-                self.v_template +
-                torch.einsum('vcp,bp->bvc', self.shapedirs[:, :, :num_betas],
-                             shape_betas[:, :num_betas]) +
-                torch.einsum('vcp,bp->bvc', self.posedirs, pose_feature) +
-                torch.einsum('vc,b->bvc', self.kid_shapedir, kid_factor))
+            self.v_template
+            + torch.einsum(
+                'vcp,bp->bvc', self.shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]
+            )
+            + torch.einsum('vcp,bp->bvc', self.posedirs, pose_feature)
+            + torch.einsum('vc,b->bvc', self.kid_shapedir, kid_factor)
+        )
 
         translations = glob_positions - torch.einsum('bjCc,bjc->bjC', glob_rotmats, j)
         vertices = (
-                torch.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed) +
-                self.weights @ translations)
+            torch.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed)
+            + self.weights @ translations
+        )
 
         return dict(
             joints=(glob_positions + trans[:, None]),
             vertices=(vertices + trans[:, None]),
-            orientations=glob_rotmats)
+            orientations=glob_rotmats,
+        )
 
     @torch.jit.export
     def single(
-            self,
-            pose_rotvecs: Optional[torch.Tensor] = None,
-            shape_betas: Optional[torch.Tensor] = None,
-            trans: Optional[torch.Tensor] = None,
-            kid_factor: Optional[torch.Tensor] = None,
-            rel_rotmats: Optional[torch.Tensor] = None,
-            glob_rotmats: Optional[torch.Tensor] = None,
-            return_vertices: bool = True
+        self,
+        pose_rotvecs: Optional[torch.Tensor] = None,
+        shape_betas: Optional[torch.Tensor] = None,
+        trans: Optional[torch.Tensor] = None,
+        kid_factor: Optional[torch.Tensor] = None,
+        rel_rotmats: Optional[torch.Tensor] = None,
+        glob_rotmats: Optional[torch.Tensor] = None,
+        return_vertices: bool = True,
     ) -> dict[str, torch.Tensor]:
         """
         Calculates the body model vertices, joint positions, and orientations for a single
@@ -252,28 +281,39 @@ class BodyModel(nn.Module):
         glob_rotmats = glob_rotmats.unsqueeze(0) if glob_rotmats is not None else None
 
         # if all are None, then shape_betas is made to be zeros(1,0)
-        if (pose_rotvecs is None and shape_betas is None and trans is None and rel_rotmats is None
-                and glob_rotmats is None):
+        if (
+            pose_rotvecs is None
+            and shape_betas is None
+            and trans is None
+            and rel_rotmats is None
+            and glob_rotmats is None
+        ):
             shape_betas = torch.zeros((1, 0), dtype=torch.float32, device=self.v_template.device)
 
         # Call forward with the adjusted arguments
         result = self.forward(
-            pose_rotvecs=pose_rotvecs, shape_betas=shape_betas, trans=trans, kid_factor=kid_factor,
-            rel_rotmats=rel_rotmats, glob_rotmats=glob_rotmats, return_vertices=return_vertices)
+            pose_rotvecs=pose_rotvecs,
+            shape_betas=shape_betas,
+            trans=trans,
+            kid_factor=kid_factor,
+            rel_rotmats=rel_rotmats,
+            glob_rotmats=glob_rotmats,
+            return_vertices=return_vertices,
+        )
 
         # Squeeze out the batch dimension in the result
         return {k: v.squeeze(0) for k, v in result.items()}
 
     @torch.jit.export
     def rototranslate(
-            self,
-            R: torch.Tensor,
-            t: torch.Tensor,
-            pose_rotvecs: torch.Tensor,
-            shape_betas: torch.Tensor,
-            trans: torch.Tensor,
-            kid_factor: Optional[torch.Tensor] = None,
-            post_translate: bool = True
+        self,
+        R: torch.Tensor,
+        t: torch.Tensor,
+        pose_rotvecs: torch.Tensor,
+        shape_betas: torch.Tensor,
+        trans: torch.Tensor,
+        kid_factor: Optional[torch.Tensor] = None,
+        post_translate: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""
         Rotates and translates the body in parametric form.
@@ -321,9 +361,7 @@ class BodyModel(nn.Module):
         new_rotmat = R @ current_rotmat
         new_pose_rotvec = torch.cat([mat2rotvec(new_rotmat), pose_rotvecs[3:]], dim=0)
 
-        pelvis = (
-                self.J_template[0]
-                + self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas)
+        pelvis = self.J_template[0] + self.J_shapedirs[0, :, : shape_betas.shape[0]] @ shape_betas
         if kid_factor is not None:
             pelvis += self.kid_J_shapedir[0] * kid_factor
 

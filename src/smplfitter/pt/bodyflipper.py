@@ -33,12 +33,12 @@ class BodyFlipper(nn.Module):
 
     @torch.jit.export
     def flip(
-            self,
-            pose_rotvecs: torch.Tensor,
-            shape_betas: torch.Tensor,
-            trans: torch.Tensor,
-            kid_factor: Optional[torch.Tensor] = None,
-            num_iter: int = 1
+        self,
+        pose_rotvecs: torch.Tensor,
+        shape_betas: torch.Tensor,
+        trans: torch.Tensor,
+        kid_factor: Optional[torch.Tensor] = None,
+        num_iter: int = 1,
     ) -> dict[str, torch.Tensor]:
         """
         Returns the body model parameters that represent the horizontally flipped 3D human, i.e.,
@@ -69,15 +69,22 @@ class BodyFlipper(nn.Module):
         flipped_vertices = self.flip_vertices(inp['vertices'])
 
         fit = self.fitter.fit(
-            target_vertices=flipped_vertices, num_iter=num_iter, beta_regularizer=0.0,
-            beta_regularizer2=0.0, final_adjust_rots=False,
+            target_vertices=flipped_vertices,
+            num_iter=num_iter,
+            beta_regularizer=0.0,
+            beta_regularizer2=0.0,
+            final_adjust_rots=False,
             kid_regularizer=1e9 if kid_factor is None else 0.0,
             initial_pose_rotvecs=self.naive_flip_rotvecs(pose_rotvecs),
             # initial_shape_betas=shape_betas,
-            requested_keys=['pose_rotvecs', 'shape_betas'])
+            requested_keys=['pose_rotvecs', 'shape_betas'],
+        )
         return dict(
-            pose_rotvecs=fit['pose_rotvecs'], shape_betas=fit['shape_betas'], trans=fit['trans'],
-            kid_factor=fit.get('kid_factor'))
+            pose_rotvecs=fit['pose_rotvecs'],
+            shape_betas=fit['shape_betas'],
+            trans=fit['trans'],
+            kid_factor=fit.get('kid_factor'),
+        )
 
     @torch.jit.export
     def flip_vertices(self, inp_vertices: torch.Tensor) -> torch.Tensor:
@@ -94,7 +101,8 @@ class BodyFlipper(nn.Module):
         """
 
         hflip_multiplier = torch.tensor(
-            [-1, 1, 1], dtype=inp_vertices.dtype, device=inp_vertices.device)
+            [-1, 1, 1], dtype=inp_vertices.dtype, device=inp_vertices.device
+        )
         v = inp_vertices.permute(1, 0, 2).reshape(self.body_model.num_vertices, -1)
         r = torch.sparse.mm(self.mirror_csr, v)
         return r.reshape(self.body_model.num_vertices, -1, 3).permute(1, 0, 2) * hflip_multiplier
@@ -113,7 +121,8 @@ class BodyFlipper(nn.Module):
             Flipped pose rotation vectors, shaped (batch_size, num_joints*3).
         """
         hflip_multiplier = torch.tensor(
-            [1, -1, -1], dtype=pose_rotvecs.dtype, device=pose_rotvecs.device)
+            [1, -1, -1], dtype=pose_rotvecs.dtype, device=pose_rotvecs.device
+        )
 
         reshaped = pose_rotvecs.reshape(-1, self.body_model.num_joints, 3)
         reshaped_flipped = reshaped[:, self.mirror_inds_joints] * hflip_multiplier
@@ -133,9 +142,11 @@ def get_mirror_csr(num_verts):
 
     if num_verts == 6890:
         smpl2smplx_csr = load_vertex_converter_csr(
-            f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl')
+            f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'
+        )
         smplx2smpl_csr = load_vertex_converter_csr(
-            f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl')
+            f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'
+        )
         smpl2mirror = smplx2smpl_csr @ smplx2mirror @ smpl2smplx_csr
         return scipy2torch_csr(smpl2mirror)
     elif num_verts == 10475:

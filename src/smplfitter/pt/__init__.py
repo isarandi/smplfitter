@@ -40,7 +40,8 @@ def get_cached_fit_fn(
     with torch.device(device):
         body_model = BodyModel(gender=gender, model_name=body_model_name)
         fitter = BodyFitter(
-            body_model, num_betas=num_betas, enable_kid=enable_kid, vertex_subset=vertex_subset,
+            body_model, num_betas=num_betas, enable_kid=enable_kid,
+            vertex_subset=torch.as_tensor(vertex_subset) if vertex_subset is not None else None,
             joint_regressor=joint_regressor)
 
         with warnings.catch_warnings():

@@ -20,9 +20,11 @@ class BodyConverter(nn.Module):
     """
 
     def __init__(
-            self, body_model_in: 'smplfitter.pt.BodyModel',
-            body_model_out: 'smplfitter.pt.BodyModel',
-            num_betas_out: int = 10):
+        self,
+        body_model_in: 'smplfitter.pt.BodyModel',
+        body_model_out: 'smplfitter.pt.BodyModel',
+        num_betas_out: int = 10,
+    ):
         super().__init__()
         self.body_model_in = body_model_in
         self.body_model_out = body_model_out
@@ -30,28 +32,29 @@ class BodyConverter(nn.Module):
 
         DATA_ROOT = os.getenv('DATA_ROOT', '.')
         if self.body_model_in.num_vertices == 6890 and self.body_model_out.num_vertices == 10475:
-            vertex_converter_csr = scipy2torch_csr(load_vertex_converter_csr(
-                f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'))
+            vertex_converter_csr = scipy2torch_csr(
+                load_vertex_converter_csr(f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl')
+            )
             self.register_buffer('vertex_converter_csr', vertex_converter_csr)
         elif self.body_model_in.num_vertices == 10475 and self.body_model_out.num_vertices == 6890:
-            vertex_converter_csr = scipy2torch_csr(load_vertex_converter_csr(
-                f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'))
+            vertex_converter_csr = scipy2torch_csr(
+                load_vertex_converter_csr(f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl')
+            )
             self.register_buffer('vertex_converter_csr', vertex_converter_csr)
         else:
             self.vertex_converter_csr = None
 
-
     @torch.jit.export
     def convert(
-            self,
-            pose_rotvecs: torch.Tensor,
-            shape_betas: torch.Tensor,
-            trans: torch.Tensor,
-            kid_factor: Optional[torch.Tensor] = None,
-            known_output_pose_rotvecs: Optional[torch.Tensor] = None,
-            known_output_shape_betas: Optional[torch.Tensor] = None,
-            known_output_kid_factor: Optional[torch.Tensor] = None,
-            num_iter: int = 1
+        self,
+        pose_rotvecs: torch.Tensor,
+        shape_betas: torch.Tensor,
+        trans: torch.Tensor,
+        kid_factor: Optional[torch.Tensor] = None,
+        known_output_pose_rotvecs: Optional[torch.Tensor] = None,
+        known_output_shape_betas: Optional[torch.Tensor] = None,
+        known_output_kid_factor: Optional[torch.Tensor] = None,
+        num_iter: int = 1,
     ) -> dict[str, torch.Tensor]:
         """
         Converts the input body parameters to the output body model's parametrization.
@@ -85,25 +88,38 @@ class BodyConverter(nn.Module):
 
         if known_output_shape_betas is not None:
             fit = self.fitter.fit_with_known_shape(
-                shape_betas=known_output_shape_betas, kid_factor=known_output_kid_factor,
-                target_vertices=verts, num_iter=num_iter, final_adjust_rots=False,
-                requested_keys=['pose_rotvecs'])
+                shape_betas=known_output_shape_betas,
+                kid_factor=known_output_kid_factor,
+                target_vertices=verts,
+                num_iter=num_iter,
+                final_adjust_rots=False,
+                requested_keys=['pose_rotvecs'],
+            )
             fit_out = dict(pose_rotvecs=fit['pose_rotvecs'], trans=fit['trans'])
         elif known_output_pose_rotvecs is not None:
             fit = self.fitter.fit_with_known_pose(
-                pose_rotvecs=known_output_pose_rotvecs, target_vertices=verts,
-                beta_regularizer=0.0, kid_regularizer=1e9 if kid_factor is None else 0.0)
+                pose_rotvecs=known_output_pose_rotvecs,
+                target_vertices=verts,
+                beta_regularizer=0.0,
+                kid_regularizer=1e9 if kid_factor is None else 0.0,
+            )
             fit_out = dict(shape_betas=fit['shape_betas'], trans=fit['trans'])
             if kid_factor is not None:
                 fit_out['kid_factor'] = fit['kid_factor']
         else:
             fit = self.fitter.fit(
-                target_vertices=verts, num_iter=num_iter, beta_regularizer=0.0,
-                final_adjust_rots=False, kid_regularizer=1e9 if kid_factor is None else 0.0,
-                requested_keys=['pose_rotvecs', 'shape_betas'])
+                target_vertices=verts,
+                num_iter=num_iter,
+                beta_regularizer=0.0,
+                final_adjust_rots=False,
+                kid_regularizer=1e9 if kid_factor is None else 0.0,
+                requested_keys=['pose_rotvecs', 'shape_betas'],
+            )
             fit_out = dict(
-                pose_rotvecs=fit['pose_rotvecs'], shape_betas=fit['shape_betas'],
-                trans=fit['trans'])
+                pose_rotvecs=fit['pose_rotvecs'],
+                shape_betas=fit['shape_betas'],
+                trans=fit['trans'],
+            )
             if kid_factor is not None:
                 fit_out['kid_factor'] = fit['kid_factor']
 
@@ -134,7 +150,7 @@ class BodyConverter(nn.Module):
 
 def load_vertex_converter_csr(vertex_converter_path):
     scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
-    return scipy_csr[:, :scipy_csr.shape[1] // 2]
+    return scipy_csr[:, : scipy_csr.shape[1] // 2]
 
 
 def load_pickle(path):
@@ -147,4 +163,5 @@ def scipy2torch_csr(sparse_matrix):
         torch.from_numpy(sparse_matrix.indptr),
         torch.from_numpy(sparse_matrix.indices),
         torch.from_numpy(sparse_matrix.data),
-        sparse_matrix.shape)
+        sparse_matrix.shape,
+    )

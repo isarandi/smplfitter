@@ -36,9 +36,7 @@ def rotvec2mat(rotvec):
     diag = cos1_axis * axis + cos_angle
     m00, m11, m22 = unstack(diag, axis=-1)
 
-    matrix = np.stack((m00, m01, m02,
-                       m10, m11, m12,
-                       m20, m21, m22), axis=-1)
+    matrix = np.stack((m00, m01, m02, m10, m11, m12, m20, m21, m22), axis=-1)
     return matrix.reshape(*axis.shape[:-1], 3, 3)
 
 
@@ -67,8 +65,7 @@ def mat2rotvec(rotmat):
     d00_large = np.logical_and(r[0][0] > r[1][1], r[0][0] > r[2][2])[..., np.newaxis]
     d11_large = (r[1][1] > r[2][2])[..., np.newaxis]
 
-    q = np.where(trace_pos, cond0,
-                 np.where(d00_large, cond1, np.where(d11_large, cond2, cond3)))
+    q = np.where(trace_pos, cond0, np.where(d00_large, cond1, np.where(d11_large, cond2, cond3)))
 
     xyz, w = np.split(q, (3,), axis=-1)
     norm = np.linalg.norm(xyz, axis=-1, keepdims=True)

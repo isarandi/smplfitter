@@ -27,14 +27,16 @@ class HandReplacer(nn.Module):
         hand_indices = load_pickle(f'{DATA_ROOT}/body_models/smplx/MANO_SMPLX_vertex_ids.pkl')
         smplx_hand_indices_all = list(hand_indices['left_hand']) + list(hand_indices['right_hand'])
         smplx2smpl_csr = load_vertex_converter_csr(
-            f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl')
+            f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'
+        )
 
         smpl_hand_indices_all = (smplx2smpl_csr[:, smplx_hand_indices_all] > 0.5).nonzero()[0]
         self.smplh_bm = BodyModel('smplh16', 'neutral')
         template = self.smplh_bm.single()['vertices']
         hand_min_x = torch.min(torch.abs(template[smpl_hand_indices_all])[:, 0])
         self.hand_mix_weight = smootherstep(
-            torch.abs(template[:, 0]), hand_min_x - 0.1, hand_min_x)
+            torch.abs(template[:, 0]), hand_min_x - 0.1, hand_min_x
+        )
         self.hand_indices_all = torch.tensor(smpl_hand_indices_all, dtype=torch.long)
 
         # Initialize converters and body model
@@ -46,7 +48,8 @@ class HandReplacer(nn.Module):
 
     def mirror_rotvecs(self, hand_pose: torch.Tensor) -> torch.Tensor:
         hflip_multiplier = torch.tensor(
-            [1, -1, -1], dtype=hand_pose.dtype, device=hand_pose.device)
+            [1, -1, -1], dtype=hand_pose.dtype, device=hand_pose.device
+        )
         return (hand_pose.reshape(-1, 3) * hflip_multiplier).reshape(-1)
 
     def copy_hand_params(self, smplh_pose: torch.Tensor) -> None:
@@ -65,9 +68,13 @@ class HandReplacer(nn.Module):
     @torch.jit.export
     def replace_hand(self, smpl_verts: torch.Tensor) -> torch.Tensor:
         fit = self.smplh_fitter.fit(
-            target_vertices=smpl_verts, num_iter=3, beta_regularizer=0.0, final_adjust_rots=False,
+            target_vertices=smpl_verts,
+            num_iter=3,
+            beta_regularizer=0.0,
+            final_adjust_rots=False,
             vertex_weights=self.vertex_weights.repeat(smpl_verts.shape[0], 1),
-            requested_keys=['pose_rotvecs', 'shape_betas'])
+            requested_keys=['pose_rotvecs', 'shape_betas'],
+        )
         self.copy_hand_params(fit['pose_rotvecs'])
         new_res = self.smplh_bm(fit['pose_rotvecs'], fit['shape_betas'], fit['trans'])
         new_verts = new_res['vertices']
@@ -76,4 +83,4 @@ class HandReplacer(nn.Module):
 
 def smootherstep(x, x0, x1):
     y = torch.clip((x - x0) / (x1 - x0), 0.0, 1.0)
-    return y ** 3 * (y * (y * 6.0 - 15.0) + 10.0)
+    return y**3 * (y * (y * 6.0 - 15.0) + 10.0)

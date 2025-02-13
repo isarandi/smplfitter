@@ -27,7 +27,8 @@ class BodyModel:
         self.gender = gender
         self.model_name = model_name
         tensors, nontensors = smplfitter.common.initialize(
-            model_name, gender, model_root, num_betas)
+            model_name, gender, model_root, num_betas
+        )
         self.v_template = tf.constant(tensors['v_template'], tf.float32)
         self.shapedirs = tf.constant(tensors['shapedirs'], tf.float32)
         self.posedirs = tf.constant(tensors['posedirs'], tf.float32)
@@ -43,15 +44,16 @@ class BodyModel:
         self.num_vertices = nontensors['num_vertices']
 
     def __call__(
-            self,
-            pose_rotvecs: Optional[tf.Tensor] = None,
-            shape_betas: Optional[tf.Tensor] = None,
-            trans: Optional[tf.Tensor] = None,
-            kid_factor: Optional[tf.Tensor] = None,
-            rel_rotmats: Optional[tf.Tensor] = None,
-            glob_rotmats: Optional[tf.Tensor] = None,
-            *,
-            return_vertices: bool = True):
+        self,
+        pose_rotvecs: Optional[tf.Tensor] = None,
+        shape_betas: Optional[tf.Tensor] = None,
+        trans: Optional[tf.Tensor] = None,
+        kid_factor: Optional[tf.Tensor] = None,
+        rel_rotmats: Optional[tf.Tensor] = None,
+        glob_rotmats: Optional[tf.Tensor] = None,
+        *,
+        return_vertices: bool = True,
+    ):
         """
         Calculates the body model vertices, joint positions, and orientations for a batch of
         instances given the input pose, shape, and translation parameters. The rotation may be
@@ -83,10 +85,14 @@ class BodyModel:
         """
         if isinstance(shape_betas, tf.RaggedTensor):
             res = self(
-                pose_rotvecs=pose_rotvecs.flat_values, shape_betas=shape_betas.flat_values,
-                trans=trans.flat_values, return_vertices=return_vertices)
+                pose_rotvecs=pose_rotvecs.flat_values,
+                shape_betas=shape_betas.flat_values,
+                trans=trans.flat_values,
+                return_vertices=return_vertices,
+            )
             return tf.nest.map_structure(
-                lambda x: tf.RaggedTensor.from_row_splits(x, shape_betas.row_splits), res)
+                lambda x: tf.RaggedTensor.from_row_splits(x, shape_betas.row_splits), res
+            )
 
         batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
         if rel_rotmats is not None:
@@ -104,29 +110,43 @@ class BodyModel:
                 glob_rotmats.append(glob_rotmats[i_parent] @ rel_rotmats[:, i_joint])
             glob_rotmats = tf.stack(glob_rotmats, axis=1)
 
-        parent_glob_rotmats = tf.concat([
-            tf.broadcast_to(tf.eye(3), tf.shape(glob_rotmats[:, :1])),
-            tf.gather(glob_rotmats, self.kintree_parents[1:], axis=1)], axis=1)
+        parent_glob_rotmats = tf.concat(
+            [
+                tf.broadcast_to(tf.eye(3), tf.shape(glob_rotmats[:, :1])),
+                tf.gather(glob_rotmats, self.kintree_parents[1:], axis=1),
+            ],
+            axis=1,
+        )
 
         if rel_rotmats is None:
             rel_rotmats = tf.linalg.matmul(parent_glob_rotmats, glob_rotmats, transpose_a=True)
 
-        shape_betas = (tf.cast(shape_betas, tf.float32) if shape_betas is not None
-                       else tf.zeros((batch_size, 0), tf.float32))
+        shape_betas = (
+            tf.cast(shape_betas, tf.float32)
+            if shape_betas is not None
+            else tf.zeros((batch_size, 0), tf.float32)
+        )
         num_betas = tf.minimum(tf.shape(shape_betas)[1], self.shapedirs.shape[2])
 
         if kid_factor is None:
             kid_factor = tf.zeros((1,), tf.float32)
         else:
             kid_factor = tf.cast(kid_factor, tf.float32)
-        j = (self.J_template +
-             tf.einsum(
-                 'jcs,bs->bjc', self.J_shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]) +
-             tf.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor))
+        j = (
+            self.J_template
+            + tf.einsum(
+                'jcs,bs->bjc', self.J_shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]
+            )
+            + tf.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor)
+        )
 
-        j_parent = tf.concat([
-            tf.broadcast_to(tf.zeros(3), tf.shape(j[:, :1])),
-            tf.gather(j, self.kintree_parents[1:], axis=1)], axis=1)
+        j_parent = tf.concat(
+            [
+                tf.broadcast_to(tf.zeros(3), tf.shape(j[:, :1])),
+                tf.gather(j, self.kintree_parents[1:], axis=1),
+            ],
+            axis=1,
+        )
         bones = j - j_parent
         rotated_bones = tf.einsum('bjCc,bjc->bjC', parent_glob_rotmats, bones)
 
@@ -146,21 +166,25 @@ class BodyModel:
 
         pose_feature = tf.reshape(rel_rotmats[:, 1:], [-1, (self.num_joints - 1) * 3 * 3])
         v_posed = (
-                self.v_template +
-                tf.einsum(
-                    'vcp,bp->bvc', self.shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]) +
-                tf.einsum('vcp,bp->bvc', self.posedirs, pose_feature) +
-                tf.einsum('vc,b->bvc', self.kid_shapedir, kid_factor))
+            self.v_template
+            + tf.einsum(
+                'vcp,bp->bvc', self.shapedirs[:, :, :num_betas], shape_betas[:, :num_betas]
+            )
+            + tf.einsum('vcp,bp->bvc', self.posedirs, pose_feature)
+            + tf.einsum('vc,b->bvc', self.kid_shapedir, kid_factor)
+        )
 
         translations = glob_positions - tf.einsum('bjCc,bjc->bjC', glob_rotmats, j)
         vertices = (
-                tf.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed) +
-                self.weights @ translations)
+            tf.einsum('bjCc,vj,bvc->bvC', glob_rotmats, self.weights, v_posed)
+            + self.weights @ translations
+        )
 
         return dict(
             joints=(glob_positions + trans[:, tf.newaxis]),
             vertices=(vertices + trans[:, tf.newaxis]),
-            orientations=glob_rotmats)
+            orientations=glob_rotmats,
+        )
 
     def single(self, *args, return_vertices=True, **kwargs):
         """
@@ -197,8 +221,15 @@ class BodyModel:
         return tf.nest.map_structure(lambda x: tf.squeeze(x, 0), result)
 
     def rototranslate(
-            self, R: tf.Tensor, t: tf.Tensor, pose_rotvecs: tf.Tensor, shape_betas: tf.Tensor,
-            trans: tf.Tensor, kid_factor=0, post_translate: bool=True):
+        self,
+        R: tf.Tensor,
+        t: tf.Tensor,
+        pose_rotvecs: tf.Tensor,
+        shape_betas: tf.Tensor,
+        trans: tf.Tensor,
+        kid_factor=0,
+        post_translate: bool = True,
+    ):
         """
         Rotates and translates the body in parametric form.
 
@@ -239,28 +270,34 @@ class BodyModel:
         new_pose_rotvec = tf.concat([mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)
 
         pelvis = (
-                self.J_template[0] +
-                self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
-                self.kid_J_shapedir[0] * kid_factor)
+            self.J_template[0]
+            + self.J_shapedirs[0, :, : shape_betas.shape[0]] @ shape_betas
+            + self.kid_J_shapedir[0] * kid_factor
+        )
         if post_translate:
             new_trans = (
-                    tf.matmul(trans, R, transpose_b=True) + t +
-                    tf.matmul(pelvis, R - tf.eye(3), transpose_b=True))
+                tf.matmul(trans, R, transpose_b=True)
+                + t
+                + tf.matmul(pelvis, R - tf.eye(3), transpose_b=True)
+            )
         else:
-            new_trans = (
-                    tf.matmul(trans - t, R, transpose_b=True) +
-                    tf.matmul(pelvis, R - tf.eye(3), transpose_b=True))
+            new_trans = tf.matmul(trans - t, R, transpose_b=True) + tf.matmul(
+                pelvis, R - tf.eye(3), transpose_b=True
+            )
         return new_pose_rotvec, new_trans
 
 
 def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats):
     batch_sizes = [
-        tf.shape(x)[0] for x in [pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats]
-        if x is not None]
+        tf.shape(x)[0]
+        for x in [pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats]
+        if x is not None
+    ]
 
     if len(batch_sizes) == 0:
         raise RuntimeError(
             'At least one argument must be given among pose_rotvecs, shape_betas, trans, '
-            'rel_rotmats.')
+            'rel_rotmats.'
+        )
 
     return batch_sizes[0]

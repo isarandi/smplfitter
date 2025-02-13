@@ -31,9 +31,7 @@ def rotvec2mat(rotvec):
     m21 = tmp + sin_axis_x
     diag = cos1_axis * axis + cos_angle
     m00, m11, m22 = tf.unstack(diag, axis=-1, num=3)
-    matrix = tf.stack((m00, m01, m02,
-                       m10, m11, m12,
-                       m20, m21, m22), axis=-1)
+    matrix = tf.stack((m00, m01, m02, m10, m11, m12, m20, m21, m22), axis=-1)
     return tf.reshape(matrix, tf.concat((tf.shape(axis)[:-1], (3, 3)), axis=-1))
 
 

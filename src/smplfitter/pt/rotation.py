@@ -31,10 +31,7 @@ def rotvec2mat(rotvec):
     m21 = tmp + sin_axis_x
     diag = cos1_axis * axis + cos_angle
     m00, m11, m22 = torch.unbind(diag, dim=-1)
-    matrix = torch.stack(
-        (m00, m01, m02,
-         m10, m11, m12,
-         m20, m21, m22), dim=-1)
+    matrix = torch.stack((m00, m01, m02, m10, m11, m12, m20, m21, m22), dim=-1)
 
     return torch.unflatten(matrix, -1, (3, 3))
 
@@ -64,8 +61,8 @@ def mat2rotvec(rotmat):
     d00_large = torch.logical_and(r[0][0] > r[1][1], r[0][0] > r[2][2]).unsqueeze(-1)
     d11_large = (r[1][1] > r[2][2]).unsqueeze(-1)
     q = torch.where(
-        trace_pos, cond0,
-        torch.where(d00_large, cond1, torch.where(d11_large, cond2, cond3)))
+        trace_pos, cond0, torch.where(d00_large, cond1, torch.where(d11_large, cond2, cond3))
+    )
     xyz, w = torch.split(q, (3, 1), dim=-1)
     norm = torch.linalg.norm(xyz, dim=-1, keepdim=True)
     return (torch.nan_to_num(2.0 / norm) * torch.atan2(norm, w)) * xyz

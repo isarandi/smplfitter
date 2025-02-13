@@ -58,8 +58,7 @@ def initialize(model_name, gender, model_root=None, num_betas=None):
     if 'J_shapedirs' in smpl_data:
         res['J_shapedirs'] = np.array(smpl_data['J_shapedirs'], dtype=np.float64)
     else:
-        res['J_shapedirs'] = np.einsum(
-            'jv,vcs->jcs', res['J_regressor'], res['shapedirs'])
+        res['J_shapedirs'] = np.einsum('jv,vcs->jcs', res['J_regressor'], res['shapedirs'])
 
     if 'J_template' in smpl_data:
         res['J_template'] = np.array(smpl_data['J_template'], dtype=np.float64)
@@ -67,8 +66,9 @@ def initialize(model_name, gender, model_root=None, num_betas=None):
         res['J_template'] = res['J_regressor'] @ res['v_template']
 
     res['v_template'] = res['v_template'] - np.einsum(
-        'vcx,x->vc', res['posedirs'],
-        np.reshape(np.tile(np.eye(3, dtype=np.float64), [res['num_joints'] - 1, 1]), [-1])
+        'vcx,x->vc',
+        res['posedirs'],
+        np.reshape(np.tile(np.eye(3, dtype=np.float64), [res['num_joints'] - 1, 1]), [-1]),
     )
 
     tensors = {
@@ -87,7 +87,7 @@ def initialize(model_name, gender, model_root=None, num_betas=None):
         'kintree_parents': res['kintree_parents'],
         'faces': res['faces'],
         'num_joints': res['num_joints'],
-        'num_vertices': res['num_vertices']
+        'num_vertices': res['num_vertices'],
     }
 
     return tensors, nontensors
@@ -119,6 +119,7 @@ def monkey_patched_for_chumpy():
         added.append('unicode')
 
     import inspect
+
     added_getargspec = False
     if not hasattr(inspect, 'getargspec'):
         inspect.getargspec = inspect.getfullargspec
