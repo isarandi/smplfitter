@@ -1,17 +1,22 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = [
+    "setuptools>=64",
+    "wheel",
+    "numpy"
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "smplfitter"
-version = "0.2.0"
-description = "Inverse kinematics solver and body shape fitter for SMPL-family body models, including a reimplementation of these body models for NumPy, PyTorch and TensorFlow"
-authors = [
-    { name = "István Sárándi", email = "istvan.sarandi@uni-tuebingen.de" }
-]
+version = "0.2.1"
+description = "Fast inverse kinematics and shape fitting for SMPL-family models in NumPy, PyTorch, and TensorFlow"
 readme = "README.md"
 requires-python = ">=3.6"
 license = { file = "LICENSE" }
+
+authors = [
+    { name = "István Sárándi", email = "istvan.sarandi@uni-tuebingen.de" }
+]
 
 dependencies = [
     "numpy",
@@ -23,9 +28,43 @@ dependencies = [
 tensorflow = ["tensorflow"]
 pytorch = ["torch"]
 
-#[tool.setuptools]
-#packages = ["smplfitter", "smplfitter.np", "smplfitter.pt", "smplfitter.tf"]
-#package-dir = { "" = "src" }
+keywords = [
+    "smpl",
+    "smplx",
+    "smplh",
+    "3d-human",
+    "body-model",
+    "ik",
+    "inverse-kinematics",
+    "parametric-model",
+    "pose-estimation",
+    "differentiable",
+    "gpu",
+    "tensorflow",
+    "pytorch",
+    "numpy",
+    "batch-processing"
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Software Development :: Libraries",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent"
+]
+
+[project.urls]
+Homepage = "https://github.com/isarandi/smplfitter"
+Repository = "https://github.com/isarandi/smplfitter"
+Issues = "https://github.com/isarandi/smplfitter/issues"
+Author = "https://istvansarandi.com"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

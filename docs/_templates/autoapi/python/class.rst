@@ -1,3 +1,5 @@
+:html_theme.sidebar_secondary.remove: true
+
 {% if obj.display %}
    {% if is_own_page %}
 {{ obj.name }}
@@ -100,20 +102,47 @@ Classes
 
 
       {% endif %}
-      {% set visible_methods = own_page_children|selectattr("type", "equalto", "method")|list %}
-      {% if visible_methods %}
-Methods
--------
+
+      {% set static_methods = own_page_children|selectattr("type", "equalto", "method")|selectattr("properties", "defined")|selectattr("properties", "equalto", ["staticmethod"])|list %}
+      {% set class_methods = own_page_children|selectattr("type", "equalto", "method")|selectattr("properties", "defined")|selectattr("properties", "equalto", ["classmethod"])|list %}
+      {% set instance_methods = own_page_children|selectattr("type", "equalto", "method")|rejectattr("properties", "equalto", ["staticmethod"])|rejectattr("properties", "equalto", ["classmethod"])|list %}
+
+      {% if instance_methods %}
+Instance Methods
+----------------
 
 .. autoapisummary::
 
-            {% for method in visible_methods %}
+         {% for method in instance_methods %}
    {{ method.id }}
-            {% endfor %}
+         {% endfor %}
 
 
       {% endif %}
+      {% if class_methods %}
+Class Methods
+-------------
 
+.. autoapisummary::
+
+         {% for method in class_methods %}
+   {{ method.id }}
+         {% endfor %}
+
+
+      {% endif %}
+      {% if static_methods %}
+Static Methods
+--------------
+
+.. autoapisummary::
+
+         {% for method in static_methods %}
+   {{ method.id }}
+         {% endfor %}
+
+
+      {% endif %}
    {% endif %}
 {% endif %}
 

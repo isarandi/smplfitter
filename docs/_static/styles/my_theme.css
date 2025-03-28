@@ -1,11 +1,11 @@
 @import url("theme.css");
 @import url("https://fonts.googleapis.com/css2?family=Mona+Sans:ital,wght@0,200..900;1,200..900&family=Geist:wght@100..900&&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Outfit:wght@100..900&display=swap");
 
-@media (min-width: 960px) {
+/*@media (min-width: 960px) {
     .bd-page-width {
         max-width: 120rem;
     }
-}
+}*/
 
 #rtd-footer-container {
     margin-top: 0 !important;
@@ -59,6 +59,18 @@ body {
   max-width: 100%;  /* default is 60em */
 }
 
-.bd-sidebar-primary {
-    width: 15%;
+/*.bd-sidebar-primary {
+    max-width: 20%;
+}*/
+
+/* Ensure links in code blocks are underlined */
+.highlight a {
+    text-decoration: underline;
+    color: #394198; /* Adjust color as needed */
+}
+
+/* For additional emphasis, change hover effect */
+.highlight a:hover {
+    text-decoration: underline;
+    color: #9090ff;
 }

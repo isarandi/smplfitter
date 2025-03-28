@@ -1,3 +1,5 @@
+:html_theme.sidebar_secondary.remove: true
+
 {% if obj.display %}
    {% if is_own_page %}
 {{ obj.name }}
