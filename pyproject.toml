@@ -48,8 +48,6 @@ keywords = [
 ]
 
 classifiers = [
-    "Intended Audience :: Developers",
-    "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries",
     "License :: OSI Approved :: MIT License",
