@@ -2,13 +2,14 @@
 requires = [
     "setuptools>=64",
     "wheel",
-    "numpy"
+    "numpy",
+    "setuptools_scm[toml]>=8"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "smplfitter"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Fast inverse kinematics and shape fitting for SMPL-family models in NumPy, PyTorch, and TensorFlow"
 readme = "README.md"
 requires-python = ">=3.6"
@@ -65,6 +66,11 @@ Homepage = "https://github.com/isarandi/smplfitter"
 Repository = "https://github.com/isarandi/smplfitter"
 Issues = "https://github.com/isarandi/smplfitter/issues"
 Author = "https://istvansarandi.com"
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+write_to = "src/barecat/_version.py"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
