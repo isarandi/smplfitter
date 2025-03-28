@@ -18,10 +18,8 @@ It can fit a batch of 4096 instances in 423 ms on a single RTX 3090 GPU giving a
 ## Installation
 
 ```bash
-pip install git+https://github.com/isarandi/smplfitter.git
+pip install smplfitter
 ```
-
-(Packaging for PyPI is planned for later.)
 
 ### Download Body Model Files
 
@@ -62,8 +60,8 @@ You can refer to the relevant [script](https://github.com/isarandi/PosePile/tree
 import torch
 from smplfitter.pt import BodyModel, BodyFitter
 
-body_model = BodyModel('smpl', 'neutral').cuda()  # create the body model to be fitted
-fitter = BodyFitter(body_model, num_betas=10).cuda()  # create the fitter
+body_model = BodyModel('smpl', 'neutral', num_betas=10).cuda()  # create the body model to be fitted
+fitter = BodyFitter(body_model).cuda()  # create the fitter
 fitter = torch.jit.script(fitter)  # optional: compile the fitter for faster execution
 
 # Obtain a batch of nonparametric vertex and joint locations (here we use dummy random data)
@@ -80,7 +78,7 @@ fit_res['pose_rotvecs'], fit_res['shape_betas'], fit_res['trans']
 
 ```python
 import torch
-from smplfitter.pt import BodyConverter
+from smplfitter.pt import BodyModel, BodyConverter
 
 bm_in = BodyModel('smpl', 'neutral')
 bm_out = BodyModel('smplx', 'neutral')
