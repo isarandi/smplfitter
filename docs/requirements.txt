@@ -10,5 +10,7 @@ sphinx-rtd-theme
 pydata-sphinx-theme
 sphinxcontrib-napoleon
 numpy
+tensorflow==2.15
+torch
 setuptools-scm
 toml
