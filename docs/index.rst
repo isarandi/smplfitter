@@ -1,7 +1,7 @@
 SMPLFitter: The Fast Way From Vertices to Parametric 3D Humans
 ================================================================
 
-.. image:: images/example.gif
+.. image:: _static/images/example.gif
    :alt: on_image
    :width: 500px
 
