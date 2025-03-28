@@ -5,7 +5,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 import torch
 import torch.nn as nn
-from smplfitter.pt.bodyfitter import BodyFitter
+import smplfitter.pt.bodyfitter
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -28,7 +28,7 @@ class BodyConverter(nn.Module):
         super().__init__()
         self.body_model_in = body_model_in
         self.body_model_out = body_model_out
-        self.fitter = BodyFitter(self.body_model_out, enable_kid=True)
+        self.fitter = smplfitter.pt.bodyfitter.BodyFitter(self.body_model_out, enable_kid=True)
 
         DATA_ROOT = os.getenv('DATA_ROOT', '.')
         if self.body_model_in.num_vertices == 6890 and self.body_model_out.num_vertices == 10475:

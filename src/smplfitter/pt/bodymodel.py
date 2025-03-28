@@ -88,11 +88,22 @@ class BodyModel(nn.Module):
         )
 
         self.kintree_parents = nontensors['kintree_parents']
+
         self.faces = nontensors['faces']
+        """Faces of the body model mesh, shaped as (num_faces, 3)."""
+
         self.num_joints = nontensors['num_joints']
+        """Number of joints in the body model."""
+
         self.num_vertices = nontensors['num_vertices']
+        """Number of vertices in the body model mesh."""
+
         self.num_betas = self.shapedirs.shape[2]
+        """Number of shape parameters (betas) used in the body model."""
+
         self.vertex_subset = nontensors['vertex_subset']
+        """Subset of vertices to use for the body model. If None, all vertices are used."""
+
         if self.vertex_subset is None:
             self.vertex_subset = np.arange(self.num_vertices)
 

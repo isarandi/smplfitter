@@ -8,7 +8,7 @@ import scipy.spatial.distance
 import torch
 import torch.nn as nn
 from smplfitter.pt.bodyconverter import load_vertex_converter_csr, scipy2torch_csr
-from smplfitter.pt.bodyfitter import BodyFitter
+import smplfitter.pt.bodyfitter
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -25,7 +25,7 @@ class BodyFlipper(nn.Module):
     def __init__(self, body_model: 'smplfitter.pt.BodyModel'):
         super().__init__()
         self.body_model = body_model
-        self.fitter = BodyFitter(self.body_model, enable_kid=True)
+        self.fitter = smplfitter.pt.bodyfitter.BodyFitter(self.body_model, enable_kid=True)
 
         res = self.body_model.single()
         self.mirror_csr = nn.Buffer(get_mirror_csr(body_model.num_vertices))
