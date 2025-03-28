@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tensorflow = ["tensorflow"]
-pytorch = ["torch"]
+tensorflow = ["tensorflow>=2.14"]
+pytorch = ["torch>=2.0"]
 
 keywords = [
     "smpl",
