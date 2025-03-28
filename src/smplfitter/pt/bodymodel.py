@@ -4,6 +4,7 @@ import smplfitter.common
 import torch
 import torch.nn as nn
 from smplfitter.pt.rotation import mat2rotvec, rotvec2mat
+import numpy as np
 
 
 class BodyModel(nn.Module):
@@ -49,45 +50,51 @@ class BodyModel(nn.Module):
         gender: str = 'neutral',
         model_root: Optional[str] = None,
         num_betas: Optional[int] = None,
+        vertex_subset_size: Optional[int] = None,
+        vertex_subset=None,
+        faces=None,
+        joint_regressor_post_lbs=None,
     ):
         super().__init__()
         self.gender = gender
         self.model_name = model_name
         tensors, nontensors = smplfitter.common.initialize(
-            model_name, gender, model_root, num_betas
+            model_name,
+            gender,
+            model_root,
+            num_betas,
+            vertex_subset_size,
+            vertex_subset,
+            faces,
+            joint_regressor_post_lbs,
         )
 
         # Register buffers and parameters
-        self.register_buffer(
-            'v_template', torch.tensor(tensors['v_template'], dtype=torch.float32)
+        self.v_template = nn.Buffer(torch.tensor(tensors['v_template'], dtype=torch.float32))
+        self.shapedirs = nn.Buffer(torch.tensor(tensors['shapedirs'], dtype=torch.float32))
+        self.posedirs = nn.Buffer(torch.tensor(tensors['posedirs'], dtype=torch.float32))
+        self.J_regressor_post_lbs = nn.Buffer(
+            torch.tensor(tensors['J_regressor_post_lbs'], dtype=torch.float32)
         )
-        self.register_buffer('shapedirs', torch.tensor(tensors['shapedirs'], dtype=torch.float32))
-        self.register_buffer('posedirs', torch.tensor(tensors['posedirs'], dtype=torch.float32))
-        self.register_buffer(
-            'J_regressor', torch.tensor(tensors['J_regressor'], dtype=torch.float32)
+        self.J_template = nn.Buffer(torch.tensor(tensors['J_template'], dtype=torch.float32))
+        self.J_shapedirs = nn.Buffer(torch.tensor(tensors['J_shapedirs'], dtype=torch.float32))
+        self.kid_shapedir = nn.Buffer(torch.tensor(tensors['kid_shapedir'], dtype=torch.float32))
+        self.kid_J_shapedir = nn.Buffer(
+            torch.tensor(tensors['kid_J_shapedir'], dtype=torch.float32)
         )
-        self.register_buffer(
-            'J_template', torch.tensor(tensors['J_template'], dtype=torch.float32)
-        )
-        self.register_buffer(
-            'J_shapedirs', torch.tensor(tensors['J_shapedirs'], dtype=torch.float32)
-        )
-        self.register_buffer(
-            'kid_shapedir', torch.tensor(tensors['kid_shapedir'], dtype=torch.float32)
-        )
-        self.register_buffer(
-            'kid_J_shapedir', torch.tensor(tensors['kid_J_shapedir'], dtype=torch.float32)
-        )
-        self.register_buffer('weights', torch.tensor(tensors['weights'], dtype=torch.float32))
-        self.register_buffer(
-            'kintree_parents_tensor',
-            torch.tensor(nontensors['kintree_parents'], dtype=torch.int64),
+        self.weights = nn.Buffer(torch.tensor(tensors['weights'], dtype=torch.float32))
+        self.kintree_parents_tensor = nn.Buffer(
+            torch.tensor(nontensors['kintree_parents'], dtype=torch.int64)
         )
 
         self.kintree_parents = nontensors['kintree_parents']
         self.faces = nontensors['faces']
         self.num_joints = nontensors['num_joints']
         self.num_vertices = nontensors['num_vertices']
+        self.num_betas = self.shapedirs.shape[2]
+        self.vertex_subset = nontensors['vertex_subset']
+        if self.vertex_subset is None:
+            self.vertex_subset = np.arange(self.num_vertices)
 
     def forward(
         self,
@@ -139,6 +146,16 @@ class BodyModel(nn.Module):
                 break
 
         device = self.v_template.device
+
+        if batch_size == 0:
+            result = dict(
+                joints=torch.empty((0, self.num_joints, 3), device=device),
+                orientations=torch.empty((0, self.num_joints, 3, 3), device=device),
+            )
+            if return_vertices:
+                result['vertices'] = torch.empty((0, self.num_vertices, 3), device=device)
+            return result
+
         if rel_rotmats is not None:
             rel_rotmats = rel_rotmats.float()
         elif pose_rotvecs is not None:
@@ -156,17 +173,15 @@ class BodyModel(nn.Module):
                 glob_rotmats_.append(glob_rotmats_[i_parent] @ rel_rotmats[:, i_joint])
             glob_rotmats = torch.stack(glob_rotmats_, dim=1)
 
-        parent_indices = self.kintree_parents_tensor[1:].to(glob_rotmats.device)
-        parent_glob_rotmats = torch.cat(
-            [
-                torch.eye(3, device=device).expand(glob_rotmats.shape[0], 1, 3, 3),
-                glob_rotmats.index_select(1, parent_indices),
-            ],
-            dim=1,
-        )
+        parent_indices1 = self.kintree_parents_tensor[1:].to(glob_rotmats.device)
+        parent_glob_rotmats1 = glob_rotmats.index_select(1, parent_indices1)
 
         if rel_rotmats is None:
-            rel_rotmats = torch.matmul(parent_glob_rotmats.transpose(-1, -2), glob_rotmats)
+            rel_rotmats1 = torch.matmul(
+                parent_glob_rotmats1.transpose(-1, -2), glob_rotmats[:, 1:]
+            )
+        else:
+            rel_rotmats1 = rel_rotmats[:, 1:]
 
         shape_betas = (
             shape_betas.float()
@@ -178,7 +193,7 @@ class BodyModel(nn.Module):
         kid_factor = (
             torch.zeros((1,), dtype=torch.float32, device=device)
             if kid_factor is None
-            else torch.tensor(kid_factor, dtype=torch.float32, device=device)
+            else torch.as_tensor(kid_factor, dtype=torch.float32, device=device)
         )
         j = (
             self.J_template
@@ -188,16 +203,13 @@ class BodyModel(nn.Module):
             + torch.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor)
         )
 
-        j_parent = torch.cat(
-            [torch.zeros(3, device=device).expand(j.shape[0], 1, 3), j[:, parent_indices]], dim=1
-        )
-        bones = j - j_parent
-        rotated_bones = torch.einsum('bjCc,bjc->bjC', parent_glob_rotmats, bones)
+        bones1 = j[:, 1:] - j[:, parent_indices1]
+        rotated_bones1 = torch.einsum('bjCc,bjc->bjC', parent_glob_rotmats1, bones1)
 
         glob_positions = [j[:, 0]]
         for i_joint in range(1, self.num_joints):
             i_parent = self.kintree_parents[i_joint]
-            glob_positions.append(glob_positions[i_parent] + rotated_bones[:, i_joint])
+            glob_positions.append(glob_positions[i_parent] + rotated_bones1[:, i_joint - 1])
         glob_positions = torch.stack(glob_positions, dim=1)
 
         trans = (
@@ -209,7 +221,8 @@ class BodyModel(nn.Module):
         if not return_vertices:
             return dict(joints=(glob_positions + trans[:, None]), orientations=glob_rotmats)
 
-        pose_feature = rel_rotmats[:, 1:].reshape(-1, (self.num_joints - 1) * 3 * 3)
+        pose_feature = rel_rotmats1.reshape(-1, (self.num_joints - 1) * 3 * 3)
+
         v_posed = (
             self.v_template
             + torch.einsum(

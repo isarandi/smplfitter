@@ -1,11 +1,12 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import tensorflow as tf
-from smplfitter.tf.bodymodel import BodyModel
 from smplfitter.tf.lstsq import lstsq, lstsq_partial_share
 from smplfitter.tf.rotation import kabsch, mat2rotvec
 from smplfitter.tf.util import safe_nan_to_zero
 
+if TYPE_CHECKING:
+    import smplfitter.tf
 
 class BodyFitter:
     """
@@ -74,7 +75,7 @@ class BodyFitter:
         if joint_regressor is not None:
             self.J_regressor = joint_regressor
         else:
-            self.J_regressor = body_model.J_regressor
+            self.J_regressor = body_model.J_regressor_post_lbs
 
     def fit(
         self,
@@ -448,6 +449,8 @@ class BodyFitter:
             new_scale_corr = x[:, -1] + 1
             if scale_fit:
                 new_shape /= new_scale_corr[..., tf.newaxis]
+                if self.enable_kid:
+                    new_kid_factor /= new_scale_corr
 
         result = dict(
             shape_betas=new_shape,

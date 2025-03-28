@@ -13,7 +13,7 @@ def lstsq(
     weighted_matrix = weights.unsqueeze(-1) * matrix
     regularized_gramian = weighted_matrix.mT @ matrix
     if l2_regularizer is not None:
-        regularized_gramian += torch.diag(l2_regularizer)
+        regularized_gramian.diagonal(dim1=-2, dim2=-1).add_(l2_regularizer)
 
     ATb = weighted_matrix.mT @ rhs
     if l2_regularizer_rhs is not None:
@@ -23,7 +23,7 @@ def lstsq(
         regularized_gramian = regularized_gramian.sum(dim=0, keepdim=True)
         ATb = ATb.sum(dim=0, keepdim=True)
 
-    chol = torch.linalg.cholesky(regularized_gramian)
+    chol, _ = torch.linalg.cholesky_ex(regularized_gramian)
     return torch.cholesky_solve(ATb, chol)
 
 
@@ -47,15 +47,15 @@ def lstsq_partial_share(
     # This way it's simpler to handle all these steps,
     # we only need to implement the unregularized case,
     # and regularization is just adding more rows to the matrix.
-    matrix = torch.cat([matrix, batch_eye(n_params, matrix.shape[0], matrix.device)], dim=1)
+    matrix = torch.cat(
+        [matrix, torch.eye(n_params, device=matrix.device).expand(matrix.shape[0], -1, -1)], dim=1
+    )
 
     if l2_regularizer_rhs is not None:
-        rhs =  torch.cat([rhs, l2_regularizer_rhs], dim=1)
+        rhs = torch.cat([rhs, l2_regularizer_rhs], dim=1)
     else:
         rhs = torch.nn.functional.pad(rhs, (0, 0, 0, n_params))
-    weights = torch.cat(
-        [weights, l2_regularizer.unsqueeze(0).expand(matrix.shape[0], -1)], dim=1
-    )
+    weights = torch.cat([weights, l2_regularizer.expand(matrix.shape[0], -1)], dim=1)
 
     # Split the shared and independent parts of the matrices
     matrix_shared, matrix_indep = torch.split(matrix, [n_shared, n_indep], dim=-1)
@@ -81,18 +81,8 @@ def lstsq_partial_share(
     )
 
     # Finally, update the estimate for the independent params
-    coeff_indep2rhs = coeff_indep2rhs - coeff_indep2shared @ coeff_shared2rhs
+    coeff_indep2rhs -= coeff_indep2shared @ coeff_shared2rhs
 
     # Repeat the shared coefficients for each sample and concatenate them with the independent ones
     coeff_shared2rhs = coeff_shared2rhs.expand(matrix.shape[0], -1, -1)
     return torch.cat([coeff_shared2rhs, coeff_indep2rhs], dim=1)
-
-
-def batch_eye(
-    n_params: int, batch_size: int, device: Optional[torch.device] = None
-) -> torch.Tensor:
-    return (
-        torch.eye(n_params, device=device)
-        .reshape(1, n_params, n_params)
-        .expand(batch_size, -1, -1)
-    )

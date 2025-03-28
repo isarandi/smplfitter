@@ -1,12 +1,14 @@
 import os
 import pickle
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import torch
 import torch.nn as nn
-from smplfitter.pt.bodymodel import BodyModel
 from smplfitter.pt.bodyfitter import BodyFitter
+
+if TYPE_CHECKING:
+    import smplfitter.pt
 
 
 class BodyConverter(nn.Module):
@@ -16,31 +18,30 @@ class BodyConverter(nn.Module):
     Parameters:
         body_model_in: Input body model to convert from.
         body_model_out: Output body model to convert to.
-        num_betas_out: Number of output beta (body shape) parameters.
     """
 
     def __init__(
         self,
         body_model_in: 'smplfitter.pt.BodyModel',
         body_model_out: 'smplfitter.pt.BodyModel',
-        num_betas_out: int = 10,
     ):
         super().__init__()
         self.body_model_in = body_model_in
         self.body_model_out = body_model_out
-        self.fitter = BodyFitter(self.body_model_out, num_betas=num_betas_out, enable_kid=True)
+        self.fitter = BodyFitter(self.body_model_out, enable_kid=True)
 
         DATA_ROOT = os.getenv('DATA_ROOT', '.')
         if self.body_model_in.num_vertices == 6890 and self.body_model_out.num_vertices == 10475:
-            vertex_converter_csr = scipy2torch_csr(
-                load_vertex_converter_csr(f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl')
-            )
-            self.register_buffer('vertex_converter_csr', vertex_converter_csr)
+            csr_path = f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'
         elif self.body_model_in.num_vertices == 10475 and self.body_model_out.num_vertices == 6890:
-            vertex_converter_csr = scipy2torch_csr(
-                load_vertex_converter_csr(f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl')
+            csr_path = f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'
+        else:
+            csr_path = None
+
+        if csr_path is not None:
+            self.vertex_converter_csr = nn.Buffer(
+                scipy2torch_csr(load_vertex_converter_csr(csr_path))
             )
-            self.register_buffer('vertex_converter_csr', vertex_converter_csr)
         else:
             self.vertex_converter_csr = None
 

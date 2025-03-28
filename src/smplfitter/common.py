@@ -8,7 +8,16 @@ import warnings
 import numpy as np
 
 
-def initialize(model_name, gender, model_root=None, num_betas=None):
+def initialize(
+    model_name,
+    gender,
+    model_root=None,
+    num_betas=None,
+    vertex_subset_size=None,
+    vertex_subset=None,
+    faces=None,
+    joint_regressor_post_lbs=None,
+):
     if model_root is None:
         DATA_ROOT = os.getenv('DATA_ROOT', default='.')
         model_root = f'{DATA_ROOT}/body_models/{model_name}'
@@ -71,23 +80,43 @@ def initialize(model_name, gender, model_root=None, num_betas=None):
         np.reshape(np.tile(np.eye(3, dtype=np.float64), [res['num_joints'] - 1, 1]), [-1]),
     )
 
+    if vertex_subset_size is not None:
+        vertex_subset_dict = np.load(f'{model_root}/vertex_subset_{vertex_subset_size}.npz')
+        vertex_subset = vertex_subset_dict['i_verts']
+        faces = vertex_subset_dict['faces']
+        joint_regressor_post_lbs = np.load(
+            f'{model_root}/vertex_subset_joint_regr_post_lbs_{vertex_subset_size}.npy'
+        )
+
+    if vertex_subset is None:
+        vertex_subset = np.arange(res['num_vertices'], dtype=np.int64)
+    else:
+        vertex_subset = np.array(vertex_subset, dtype=np.int64)
+
+    if faces is None:
+        faces = res['faces']
+
+    if joint_regressor_post_lbs is None:
+        joint_regressor_post_lbs = res['J_regressor']
+
     tensors = {
-        'v_template': res['v_template'],
-        'shapedirs': res['shapedirs'][:, :, :num_betas],
-        'posedirs': res['posedirs'],
-        'J_regressor': res['J_regressor'],
+        'v_template': res['v_template'][vertex_subset],
+        'shapedirs': res['shapedirs'][vertex_subset, :, :num_betas],
+        'posedirs': res['posedirs'][vertex_subset],
+        'J_regressor_post_lbs': joint_regressor_post_lbs,
         'J_template': res['J_template'],
         'J_shapedirs': res['J_shapedirs'][:, :, :num_betas],
-        'kid_shapedir': res['kid_shapedir'],
+        'kid_shapedir': res['kid_shapedir'][vertex_subset],
         'kid_J_shapedir': res['kid_J_shapedir'],
-        'weights': res['weights'],
+        'weights': res['weights'][vertex_subset],
     }
 
     nontensors = {
         'kintree_parents': res['kintree_parents'],
-        'faces': res['faces'],
+        'faces': faces,
         'num_joints': res['num_joints'],
-        'num_vertices': res['num_vertices'],
+        'num_vertices': len(vertex_subset),
+        'vertex_subset': vertex_subset,
     }
 
     return tensors, nontensors
@@ -107,9 +136,9 @@ def monkey_patched_for_chumpy():
             except:
                 pass
 
-    sys.modules[f'numpy.float'] = float
-    sys.modules[f'numpy.complex'] = np.complex128
-    sys.modules[f'numpy.NINF'] = -np.inf
+    sys.modules['numpy.float'] = float
+    sys.modules['numpy.complex'] = np.complex128
+    sys.modules['numpy.NINF'] = -np.inf
     np.NINF = -np.inf
     np.complex = np.complex128
     np.float = float
@@ -134,3 +163,4 @@ def monkey_patched_for_chumpy():
 
     if added_getargspec:
         del inspect.getargspec
+

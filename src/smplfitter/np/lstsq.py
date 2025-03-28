@@ -21,9 +21,6 @@ def lstsq(matrix, rhs, weights, l2_regularizer=None, shared=False):
 
 def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, n_shared=0):
     n_params = matrix.shape[-1]
-    n_rhs_outputs = rhs.shape[-1]
-    n_indep = n_params - n_shared
-
     matrix = np.concatenate(
         [matrix, np.eye(n_params)[np.newaxis, ...].repeat(matrix.shape[0], axis=0)], axis=1
     )

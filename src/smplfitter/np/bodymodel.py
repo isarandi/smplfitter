@@ -32,7 +32,7 @@ class BodyModel:
         self.v_template = np.array(tensors['v_template'], np.float32)
         self.shapedirs = np.array(tensors['shapedirs'], np.float32)
         self.posedirs = np.array(tensors['posedirs'], np.float32)
-        self.J_regressor = np.array(tensors['J_regressor'], np.float32)
+        self.J_regressor_post_lbs = np.array(tensors['J_regressor_post_lbs'], np.float32)
         self.J_template = np.array(tensors['J_template'], np.float32)
         self.J_shapedirs = np.array(tensors['J_shapedirs'], np.float32)
         self.kid_shapedir = np.array(tensors['kid_shapedir'], np.float32)
@@ -102,17 +102,13 @@ class BodyModel:
                 glob_rotmats.append(glob_rotmats[i_parent] @ rel_rotmats[:, i_joint])
             glob_rotmats = np.stack(glob_rotmats, axis=1)
 
-        parent_indices = self.kintree_parents[1:]
-        parent_glob_rotmats = np.concatenate(
-            [
-                np.tile(np.eye(3), [glob_rotmats.shape[0], 1, 1, 1]),
-                glob_rotmats[:, parent_indices],
-            ],
-            axis=1,
-        )
+        parent_indices1 = self.kintree_parents[1:]
+        parent_glob_rotmats1 = glob_rotmats[:, parent_indices1]
 
         if rel_rotmats is None:
-            rel_rotmats = matmul_transp_a(parent_glob_rotmats, glob_rotmats)
+            rel_rotmats1 = matmul_transp_a(parent_glob_rotmats1, glob_rotmats[:, 1:])
+        else:
+            rel_rotmats1 = rel_rotmats[:, 1:]
 
         if shape_betas is None:
             shape_betas = np.zeros((batch_size, 0), np.float32)
@@ -133,18 +129,13 @@ class BodyModel:
             + np.einsum('jc,b->bjc', self.kid_J_shapedir, kid_factor)
         )
 
-        glob_rotmats = [rel_rotmats[:, 0]]
-        glob_positions = [j[:, 0]]
+        bones1 = j[:, 1:] - j[:, parent_indices1]
+        rotated_bones1 = np.einsum('bjCc,bjc->bjC', parent_glob_rotmats1, bones1)
 
+        glob_positions = [j[:, 0]]
         for i_joint in range(1, self.num_joints):
             i_parent = self.kintree_parents[i_joint]
-            glob_rotmats.append(glob_rotmats[i_parent] @ rel_rotmats[:, i_joint])
-            glob_positions.append(
-                glob_positions[i_parent]
-                + np.einsum('bCc,bc->bC', glob_rotmats[i_parent], j[:, i_joint] - j[:, i_parent])
-            )
-
-        glob_rotmats = np.stack(glob_rotmats, axis=1)
+            glob_positions.append(glob_positions[i_parent] + rotated_bones1[:, i_joint - 1])
         glob_positions = np.stack(glob_positions, axis=1)
 
         if trans is None:
@@ -155,7 +146,7 @@ class BodyModel:
         if not return_vertices:
             return dict(joints=(glob_positions + trans[:, np.newaxis]), orientations=glob_rotmats)
 
-        pose_feature = np.reshape(rel_rotmats[:, 1:], [-1, (self.num_joints - 1) * 3 * 3])
+        pose_feature = np.reshape(rel_rotmats1, [-1, (self.num_joints - 1) * 3 * 3])
         v_posed = (
             self.v_template
             + np.einsum(
@@ -261,10 +252,11 @@ class BodyModel:
             + self.kid_J_shapedir[0] * kid_factor
         )
 
+        eye = np.eye(3, dtype=np.float32)
         if post_translate:
-            new_trans = pelvis @ (R.T - np.eye(3)) + trans @ R.T + t
+            new_trans = pelvis @ (R.T - eye) + trans @ R.T + t
         else:
-            new_trans = pelvis @ (R.T - np.eye(3)) + (trans - t) @ R.T
+            new_trans = pelvis @ (R.T - eye) + (trans - t) @ R.T
         return new_pose_rotvec, new_trans
 
 

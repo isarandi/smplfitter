@@ -2,9 +2,8 @@ import torch
 import numpy as np
 from smplfitter.pt.bodymodel import BodyModel
 from smplfitter.pt.bodyfitter import BodyFitter
-from smplfitter.pt.bodyconverter import BodyConverter, load_vertex_converter_csr, load_pickle
+from smplfitter.pt.bodyconverter import load_vertex_converter_csr, load_pickle
 import os
-import pickle
 import torch.nn as nn
 
 
@@ -14,13 +13,6 @@ class HandReplacer(nn.Module):
     """
 
     def __init__(self, hand_pose_source: torch.Tensor):
-        """
-        Initialize the HandReplacer.
-
-        Parameters:
-            hand_indices_path (str): Path to the hand vertex indices pickle file.
-            smplx_bm_config (dict): Configuration for SMPL-X body model.
-        """
         # Load hand vertex indices
         super().__init__()
         DATA_ROOT = os.getenv('DATA_ROOT', '.')
@@ -41,7 +33,7 @@ class HandReplacer(nn.Module):
 
         # Initialize converters and body model
         self.smplh_bm = BodyModel('smplh16', 'neutral')
-        self.smplh_fitter = BodyFitter(self.smplh_bm, num_betas=16)
+        self.smplh_fitter = BodyFitter(self.smplh_bm)
         self.hand_pose_source = hand_pose_source
         self.vertex_weights = torch.ones((1, self.smplh_bm.num_vertices), dtype=torch.float32)
         self.vertex_weights[:, self.hand_indices_all] = 1e-1
@@ -54,10 +46,10 @@ class HandReplacer(nn.Module):
 
     def copy_hand_params(self, smplh_pose: torch.Tensor) -> None:
         """
-        Copy hand parameters from a source to SMPL-X pose.
+        Copy hand parameters from a source to SMPL-H pose.
 
         Parameters:
-            smplx_pose (torch.Tensor): SMPL-X pose to modify.
+            smplh_pose (torch.Tensor): SMPL-H pose to modify.
         """
         start = 22
         left_range = slice(start * 3, (start + 15) * 3)

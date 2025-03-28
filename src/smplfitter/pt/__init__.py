@@ -34,15 +34,16 @@ def get_cached_fit_fn(
         body_model_name='smpl', gender='neutral', num_betas=10, enable_kid=False,
         requested_keys=('pose_rotvecs', 'shape_betas', 'trans'),
         beta_regularizer=1.0, beta_regularizer2=0.0, num_iter=3, vertex_subset=None,
-        joint_regressor=None,
+        joint_regressor_post_lbs=None,
         share_beta=False, final_adjust_rots=True, scale_target=False,
         scale_fit=False, scale_regularizer=0.0, kid_regularizer=None, device='cuda'):
     with torch.device(device):
-        body_model = BodyModel(gender=gender, model_name=body_model_name)
-        fitter = BodyFitter(
-            body_model, num_betas=num_betas, enable_kid=enable_kid,
+        body_model = BodyModel(
+            gender=gender, model_name=body_model_name, num_betas=num_betas,
             vertex_subset=torch.as_tensor(vertex_subset) if vertex_subset is not None else None,
-            joint_regressor=joint_regressor)
+            joint_regressor_post_lbs=joint_regressor_post_lbs
+        )
+        fitter = BodyFitter(body_model, enable_kid=enable_kid)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -64,10 +65,10 @@ def get_cached_fit_fn(
             return {k: v for k, v in res.items()}
 
         def wrapped(verts, joints, vertex_weights, joint_weights):
-            verts_resh = verts.view(-1, fitter.num_vertices, 3)
+            verts_resh = verts.view(-1, body_model.num_vertices, 3)
             joints_resh = joints.view(-1, body_model.num_joints, 3) if joints is not None else None
             vertex_weights_resh = (
-                vertex_weights.view(-1, fitter.num_vertices)
+                vertex_weights.view(-1, body_model.num_vertices)
                 if vertex_weights is not None else None)
             joint_weights_resh = (
                 joint_weights.view(-1, body_model.num_joints)

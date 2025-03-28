@@ -68,7 +68,7 @@ class BodyFitter:
         if joint_regressor is not None:
             self.J_regressor = joint_regressor
         else:
-            self.J_regressor = body_model.J_regressor
+            self.J_regressor = body_model.J_regressor_post_lbs
 
     def fit(
         self,
@@ -116,10 +116,6 @@ class BodyFitter:
                 alignment.
             scale_fit: If True, estimates a scale factor to apply to the fitted mesh for
                 alignment.
-            initial_pose_rotvecs: Optional initial pose rotations, if a good guess is available.
-                Usually not necessary (experimental).
-            initial_shape_betas: Optional initial shape parameters (betas), if a good guess is
-                available. Usually not necessary (experimental).
             initial_kid_factor: Same as above, but for the kid blendshape factor.
             requested_keys: List of keys specifying which results to return.
 
@@ -426,6 +422,8 @@ class BodyFitter:
             new_scale_corr = x[:, -1] + 1
             if scale_fit:
                 new_shape /= new_scale_corr[..., np.newaxis]
+                if self.enable_kid:
+                    new_kid_factor /= new_scale_corr
 
         result = dict(
             shape_betas=new_shape,

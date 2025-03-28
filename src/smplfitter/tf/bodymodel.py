@@ -32,7 +32,7 @@ class BodyModel:
         self.v_template = tf.constant(tensors['v_template'], tf.float32)
         self.shapedirs = tf.constant(tensors['shapedirs'], tf.float32)
         self.posedirs = tf.constant(tensors['posedirs'], tf.float32)
-        self.J_regressor = tf.constant(tensors['J_regressor'], tf.float32)
+        self.J_regressor_post_lbs = tf.constant(tensors['J_regressor_post_lbs'], tf.float32)
         self.J_template = tf.constant(tensors['J_template'], tf.float32)
         self.J_shapedirs = tf.constant(tensors['J_shapedirs'], tf.float32)
         self.kid_shapedir = tf.constant(tensors['kid_shapedir'], tf.float32)
