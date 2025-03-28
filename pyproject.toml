@@ -47,14 +47,6 @@ keywords = [
     "batch-processing"
 ]
 
-classifiers = [
-    "Topic :: Software Development :: Libraries",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python",
-    "Programming Language :: Python :: 3",
-    "Operating System :: OS Independent"
-]
-
 [project.urls]
 Homepage = "https://github.com/isarandi/smplfitter"
 Repository = "https://github.com/isarandi/smplfitter"
