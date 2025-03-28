@@ -70,7 +70,7 @@ Author = "https://istvansarandi.com"
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
-write_to = "src/barecat/_version.py"
+write_to = "src/smplfitter/_version.py"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
