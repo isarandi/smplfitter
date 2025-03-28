@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tensorflow = ["tensorflow>=2.14"]
-pytorch = ["torch>=2.0"]
+tensorflow = ["tensorflow"]
+pytorch = ["torch"]
 
 keywords = [
     "smpl",
@@ -48,7 +48,6 @@ keywords = [
 ]
 
 classifiers = [
-    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
