@@ -70,7 +70,7 @@ vertices = torch.rand((batch_size, 6890, 3)).cuda()
 joints = torch.rand((batch_size, 24, 3)).cuda()
 
 # Do the fitting!
-fit_res = fitter.fit(vertices, joints, n_iter=3, beta_regularizer=1)
+fit_res = fitter.fit(vertices, joints, num_iter=3, beta_regularizer=1)
 fit_res['pose_rotvecs'], fit_res['shape_betas'], fit_res['trans']
 ```
 
