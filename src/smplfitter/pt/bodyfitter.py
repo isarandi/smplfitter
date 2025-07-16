@@ -560,8 +560,8 @@ class BodyFitter(nn.Module):
                 glob_rotmats = self._fit_global_rotations_dependent(
                     target_vertices,
                     target_joints,
-                    ref_verts + ref_trans,
-                    ref_joints + ref_trans,
+                    ref_verts + ref_trans.unsqueeze(-2),
+                    ref_joints + ref_trans.unsqueeze(-2),
                     vertex_weights,
                     joint_weights,
                     glob_rotmats,
