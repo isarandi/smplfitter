@@ -50,7 +50,7 @@ $DATA_ROOT/body_models
 └── smplx2smpl_deftrafo_setup.pkl
 ```
 
-You can refer to the relevant [script](https://github.com/isarandi/PosePile/tree/main/posepile/get_body_models.sh) in the PosePile repo about how to download these files.
+You can refer to the relevant [script](https://github.com/isarandi/posepile/tree/main/posepile/src/get_body_models.sh) in the PosePile repo about how to download these files.
 
 ## Usage Examples
 
@@ -97,11 +97,11 @@ out['pose_rotvecs'], out['shape_betas'], out['trans']
 
 ## The Algorithm
 
-SMPL(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLfit approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
+SMPL(-X/+H) is a parametric body model that takes body part orientations $\theta$ and body shape vector $\beta$ as inputs and yields vertex and joint locations as outputs. SMPLFitter approximates the **inverse operation**: it takes vertex and joint locations as inputs and yields orientations $\theta$ and shape $\beta$ as outputs.
 
 Our algorithm alternates between fitting orientations and fitting shape. A good result can be obtained already with 1-3 iterations.
 
-We illustrate the steps with the following example. Given the depicted RGB image, we used [Neural Localizer Fields (NLF)](https://virtualhumans.mpi-inf.mpg.de/nlf) to obtain nonparametric vertex and joint locations as follows:
+We illustrate the steps with the following example. Given the depicted RGB image, we used [Neural Localizer Fields (NLF)](https://istvansarandi.com/nlf) to obtain nonparametric vertex and joint locations as follows:
 
 <img src="docs/_static/images/image.png" alt="on_image" width="300"/>
 <img src="docs/_static/images/on_image.png" alt="on_image" width="300"/>
