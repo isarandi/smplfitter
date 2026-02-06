@@ -21,7 +21,7 @@ jobs:
           python-version: "3.10"
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.4.10
 
       - name: Lint with ruff
         run: |
