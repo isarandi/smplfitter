@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import getpass
 import http.cookiejar
-import io
 import os
 import shutil
 import ssl
@@ -83,9 +82,9 @@ def _resolve_body_models_dir():
         return Path(data_root) / 'body_models'
 
     default = Path.home() / '.local' / 'share' / 'smplfitter' / 'body_models'
-    print(f'No SMPLFITTER_BODY_MODELS or DATA_ROOT environment variable set.')
+    print('No SMPLFITTER_BODY_MODELS or DATA_ROOT environment variable set.')
     print(f'Default location: {default}')
-    answer = input(f'Use this location? [Y/n] ').strip().lower()
+    answer = input('Use this location? [Y/n] ').strip().lower()
     if answer in ('', 'y', 'yes'):
         return default
 
@@ -188,9 +187,7 @@ def _download_smplx(opener, auth_data, body_models_dir):
     with tempfile.TemporaryDirectory() as tmp:
         # Main SMPL-X models
         zip_path = Path(tmp) / 'smplx.zip'
-        _download_mpi_to_file(
-            opener, auth_data, 'smplx', 'models_smplx_v1_1.zip', zip_path
-        )
+        _download_mpi_to_file(opener, auth_data, 'smplx', 'models_smplx_v1_1.zip', zip_path)
         print('  Extracting SMPL-X models...')
         with zipfile.ZipFile(zip_path) as zf:
             for member in zf.namelist():
@@ -349,8 +346,11 @@ def _download_correspondences(opener, auth_data, body_models_dir):
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = Path(tmp) / 'correspondences.zip'
         _download_mpi_to_file(
-            opener, auth_data, 'smplx',
-            'smplx_mano_flame_correspondences.zip', zip_path,
+            opener,
+            auth_data,
+            'smplx',
+            'smplx_mano_flame_correspondences.zip',
+            zip_path,
         )
         print('  Extracting...')
         with zipfile.ZipFile(zip_path) as zf:
@@ -383,6 +383,7 @@ def _download_spin_regressors(smpl_dir):
 
 
 # --- Helpers ---
+
 
 def _extract_zip_member(zf, member, dest):
     """Extract a single zip member to a destination path."""

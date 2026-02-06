@@ -10,7 +10,13 @@ from .bodymodel import BodyModel
 from .bodyfitter import BodyFitter
 from .bodyconverter import BodyConverter
 
-__all__ = ['BodyModel', 'BodyFitter', 'BodyConverter', 'get_cached_body_model', 'get_cached_fit_fn']
+__all__ = [
+    'BodyModel',
+    'BodyFitter',
+    'BodyConverter',
+    'get_cached_body_model',
+    'get_cached_fit_fn',
+]
 
 
 @functools.lru_cache()

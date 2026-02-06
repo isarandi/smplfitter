@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pytest
 
 if TYPE_CHECKING:
     from conftest import Backend
@@ -165,12 +164,8 @@ class TestFitterWithScale:
         verts_fit = fitter_backend.to_numpy(res_fit['vertices'])
         joints_fit = fitter_backend.to_numpy(res_fit['joints'])
 
-        verts_err = np.linalg.norm(
-            scaled_verts * scale_corr[:, None, None] - verts_fit, axis=-1
-        )
-        joints_err = np.linalg.norm(
-            scaled_jnts * scale_corr[:, None, None] - joints_fit, axis=-1
-        )
+        verts_err = np.linalg.norm(scaled_verts * scale_corr[:, None, None] - verts_fit, axis=-1)
+        joints_err = np.linalg.norm(scaled_jnts * scale_corr[:, None, None] - joints_fit, axis=-1)
 
         mean_verts_err = np.mean(verts_err)
         mean_joints_err = np.mean(joints_err)
@@ -179,9 +174,9 @@ class TestFitterWithScale:
 
         # Check scale correction is approximately correct
         mean_scale = np.mean(scale_corr)
-        assert abs(mean_scale - expected_scale) < 0.05, (
-            f'Scale {mean_scale:.3f} != {expected_scale:.3f}'
-        )
+        assert (
+            abs(mean_scale - expected_scale) < 0.05
+        ), f'Scale {mean_scale:.3f} != {expected_scale:.3f}'
 
     def test_fitter_scale_fit(self, fitter_backend: Backend):
         """Test fitting with scale_fit=True."""
@@ -227,12 +222,8 @@ class TestFitterWithScale:
         verts_fit = fitter_backend.to_numpy(res_fit['vertices'])
         joints_fit = fitter_backend.to_numpy(res_fit['joints'])
 
-        verts_err = np.linalg.norm(
-            scaled_verts - verts_fit * scale_corr[:, None, None], axis=-1
-        )
-        joints_err = np.linalg.norm(
-            scaled_jnts - joints_fit * scale_corr[:, None, None], axis=-1
-        )
+        verts_err = np.linalg.norm(scaled_verts - verts_fit * scale_corr[:, None, None], axis=-1)
+        joints_err = np.linalg.norm(scaled_jnts - joints_fit * scale_corr[:, None, None], axis=-1)
 
         mean_verts_err = np.mean(verts_err)
         mean_joints_err = np.mean(joints_err)
@@ -241,9 +232,9 @@ class TestFitterWithScale:
 
         # Check scale correction is approximately correct
         mean_scale = np.mean(scale_corr)
-        assert abs(mean_scale - scale_factor) < 0.05, (
-            f'Scale {mean_scale:.3f} != {scale_factor:.3f}'
-        )
+        assert (
+            abs(mean_scale - scale_factor) < 0.05
+        ), f'Scale {mean_scale:.3f} != {scale_factor:.3f}'
 
 
 class TestFitterKnownParams:

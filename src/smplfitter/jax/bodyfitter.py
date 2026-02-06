@@ -1,5 +1,3 @@
-"""JAX implementation of body model fitting."""
-
 from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
@@ -429,7 +427,7 @@ class BodyFitter:
 
         # Slice shape_betas if needed
         if shape_betas.shape[1] > self.n_betas:
-            shape_betas = shape_betas[:, :self.n_betas]
+            shape_betas = shape_betas[:, : self.n_betas]
 
         # Subtract mean for numerical stability
         if target_joints is None:
@@ -491,8 +489,13 @@ class BodyFitter:
 
         # Compute translation (and optionally scale)
         ref_scale_corr, ref_trans = fit_scale_and_translation(
-            target_vertices, ref_verts, target_joints, ref_joints,
-            vertex_weights, joint_weights, scale=scale_fit,
+            target_vertices,
+            ref_verts,
+            target_joints,
+            ref_joints,
+            vertex_weights,
+            joint_weights,
+            scale=scale_fit,
         )
 
         # Optional final rotation adjustment
@@ -956,8 +959,13 @@ class BodyFitter:
 
 
 def fit_scale_and_translation(
-    target_vertices, reference_vertices, target_joints, reference_joints,
-    vertex_weights=None, joint_weights=None, scale=False,
+    target_vertices,
+    reference_vertices,
+    target_joints,
+    reference_joints,
+    vertex_weights=None,
+    joint_weights=None,
+    scale=False,
 ):
     if target_joints is None or reference_joints is None:
         target_both = target_vertices

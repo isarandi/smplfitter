@@ -1,5 +1,3 @@
-"""JAX implementation of body model forward pass."""
-
 from __future__ import annotations
 
 from typing import Optional
@@ -40,9 +38,7 @@ class BodyModel:
             self.kid_shapedir = jnp.array(data.kid_shapedir, dtype=jnp.float32)
             self.kid_J_shapedir = jnp.array(data.kid_J_shapedir, dtype=jnp.float32)
             self.weights = jnp.array(data.weights, dtype=jnp.float32)
-            self.J_regressor_post_lbs = jnp.array(
-                data.J_regressor_post_lbs, dtype=jnp.float32
-            )
+            self.J_regressor_post_lbs = jnp.array(data.J_regressor_post_lbs, dtype=jnp.float32)
 
         self.kintree_parents = data.kintree_parents
         self.num_joints = data.num_joints
@@ -172,7 +168,7 @@ class BodyModel:
 
         pelvis = (
             self.J_template[0]
-            + self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas
+            + self.J_shapedirs[0, :, : shape_betas.shape[0]] @ shape_betas
             + self.kid_J_shapedir[0] * kid_factor
         )
 

@@ -110,8 +110,8 @@ def initialize(
             raise FileNotFoundError(
                 f'Body model file not found: {filepath}\n\n'
                 f'Set the body model location using one of:\n'
-                f'  1. BodyModel(\'{model_name}\', \'{gender}\', '
-                f'model_root=\'/your/path/body_models/{model_name}\')\n'
+                f"  1. BodyModel('{model_name}', '{gender}', "
+                f"model_root='/your/path/body_models/{model_name}')\n"
                 f'  2. export SMPLFITTER_BODY_MODELS=/your/path/body_models\n'
                 f'  3. export DATA_ROOT=/your/path   '
                 f'(looks for $DATA_ROOT/body_models/)\n\n'

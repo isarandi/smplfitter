@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pytest
 
 if TYPE_CHECKING:
     from conftest import Backend
@@ -34,9 +33,11 @@ class TestConverterRoundtrip:
         pose_rotvecs, shape_betas, trans = _make_random_smpl_params()
 
         model_smpl = backend.prepare_model(
-            backend.module.BodyModel('smpl', 'neutral', num_betas=10))
+            backend.module.BodyModel('smpl', 'neutral', num_betas=10)
+        )
         model_smplx = backend.prepare_model(
-            backend.module.BodyModel('smplx', 'neutral', num_betas=10))
+            backend.module.BodyModel('smplx', 'neutral', num_betas=10)
+        )
 
         converter = _make_converter(backend, model_smpl, model_smplx)
         reverse_converter = _make_converter(backend, model_smplx, model_smpl)
@@ -79,9 +80,11 @@ class TestConverterVertexAccuracy:
         pose_rotvecs, shape_betas, trans = _make_random_smpl_params()
 
         model_smpl = backend.prepare_model(
-            backend.module.BodyModel('smpl', 'neutral', num_betas=10))
+            backend.module.BodyModel('smpl', 'neutral', num_betas=10)
+        )
         model_smplx = backend.prepare_model(
-            backend.module.BodyModel('smplx', 'neutral', num_betas=10))
+            backend.module.BodyModel('smplx', 'neutral', num_betas=10)
+        )
 
         converter = _make_converter(backend, model_smpl, model_smplx)
 

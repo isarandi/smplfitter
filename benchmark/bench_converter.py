@@ -22,7 +22,9 @@ def load_sparse_matrix(path: str) -> scipy.sparse.csr_matrix:
     return data['mtx'].tocsr()
 
 
-def convert_vertices_np(vertices: np.ndarray, conversion_matrix: scipy.sparse.csr_matrix) -> np.ndarray:
+def convert_vertices_np(
+    vertices: np.ndarray, conversion_matrix: scipy.sparse.csr_matrix
+) -> np.ndarray:
     """Convert vertices using numpy/scipy sparse matrix multiplication."""
     # vertices: (batch, num_verts_in, 3) -> (batch, num_verts_out, 3)
     batch_size = vertices.shape[0]
@@ -32,8 +34,11 @@ def convert_vertices_np(vertices: np.ndarray, conversion_matrix: scipy.sparse.cs
     return results
 
 
-def benchmark_pytorch(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.csr_matrix,
-                      smpl2smplx_mat: scipy.sparse.csr_matrix) -> dict:
+def benchmark_pytorch(
+    smpl_verts: np.ndarray,
+    smplx2smpl_mat: scipy.sparse.csr_matrix,
+    smpl2smplx_mat: scipy.sparse.csr_matrix,
+) -> dict:
     """Benchmark PyTorch backend."""
     import torch
     import smplfitter.pt as smplfitter
@@ -102,8 +107,11 @@ def benchmark_pytorch(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.csr_m
     return results
 
 
-def benchmark_tensorflow(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.csr_matrix,
-                         smpl2smplx_mat: scipy.sparse.csr_matrix) -> dict:
+def benchmark_tensorflow(
+    smpl_verts: np.ndarray,
+    smplx2smpl_mat: scipy.sparse.csr_matrix,
+    smpl2smplx_mat: scipy.sparse.csr_matrix,
+) -> dict:
     """Benchmark TensorFlow backend."""
     import tensorflow as tf
     import smplfitter.tf as smplfitter
@@ -137,6 +145,7 @@ def benchmark_tensorflow(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.cs
                 beta_regularizer=0.0,
                 requested_keys=['pose_rotvecs', 'shape_betas'],
             )
+
         return fit_fn
 
     fit_fns = {n: make_fit_fn(n) for n in [1, 2, 3, 4, 5]}
@@ -145,9 +154,7 @@ def benchmark_tensorflow(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.cs
     for num_iter in [1, 2, 3, 4, 5]:
         for _ in range(3):
             _ = fit_fns[num_iter](smplx_target_verts, smplx_target_joints)
-            _ = forward_fn(
-                _['pose_rotvecs'], _['shape_betas'], _['trans']
-            )['vertices'].numpy()
+            _ = forward_fn(_['pose_rotvecs'], _['shape_betas'], _['trans'])['vertices'].numpy()
 
     results = {}
     for num_iter in [1, 2, 3, 4, 5]:
@@ -181,8 +188,11 @@ def benchmark_tensorflow(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.cs
     return results
 
 
-def benchmark_numba(smpl_verts: np.ndarray, smplx2smpl_mat: scipy.sparse.csr_matrix,
-                    smpl2smplx_mat: scipy.sparse.csr_matrix) -> dict:
+def benchmark_numba(
+    smpl_verts: np.ndarray,
+    smplx2smpl_mat: scipy.sparse.csr_matrix,
+    smpl2smplx_mat: scipy.sparse.csr_matrix,
+) -> dict:
     """Benchmark Numba backend."""
     import smplfitter.nb as smplfitter
 
@@ -245,8 +255,13 @@ def main():
     import trimesh
 
     parser = argparse.ArgumentParser(description='Benchmark SMPL-to-SMPLX conversion')
-    parser.add_argument('--backends', nargs='+', default=['pt', 'tf', 'nb'],
-                        choices=['pt', 'tf', 'nb'], help='Backends to benchmark')
+    parser.add_argument(
+        '--backends',
+        nargs='+',
+        default=['pt', 'tf', 'nb'],
+        choices=['pt', 'tf', 'nb'],
+        help='Backends to benchmark',
+    )
     args = parser.parse_args()
 
     data_root = Path(os.environ.get('DATA_ROOT', '/work/sarandi/data'))
@@ -260,13 +275,13 @@ def main():
     print(f'Loaded {len(smpl_verts)} SMPL meshes')
 
     # Load conversion matrices
-    smplx2smpl_mat = load_sparse_matrix(
-        f'{data_root}/body_models/smplx2smpl_deftrafo_setup.pkl'
-    )[:, :10475].astype(np.float32)
+    smplx2smpl_mat = load_sparse_matrix(f'{data_root}/body_models/smplx2smpl_deftrafo_setup.pkl')[
+        :, :10475
+    ].astype(np.float32)
 
-    smpl2smplx_mat = load_sparse_matrix(
-        f'{data_root}/body_models/smpl2smplx_deftrafo_setup.pkl'
-    )[:, :6890].astype(np.float32)
+    smpl2smplx_mat = load_sparse_matrix(f'{data_root}/body_models/smpl2smplx_deftrafo_setup.pkl')[
+        :, :6890
+    ].astype(np.float32)
 
     # Load official converter outputs for comparison
     official_paths = sorted(official_output_dir.glob('*.obj'))[:33]
@@ -312,6 +327,7 @@ def main():
         except Exception as e:
             print(f'Error running {backend} benchmark: {e}')
             import traceback
+
             traceback.print_exc()
 
     # Summary comparison
@@ -323,7 +339,9 @@ def main():
         print('-' * 40)
         for backend, results in all_results.items():
             r = results[3]
-            print(f'{backend.upper():<10} {r["mean_time"]:>6.1f} ± {r["std_time"]:>4.1f}   {r["error"]:>6.2f}')
+            print(
+                f'{backend.upper():<10} {r["mean_time"]:>6.1f} ± {r["std_time"]:>4.1f}   {r["error"]:>6.2f}'
+            )
 
     print('\n' + '-' * 60)
     print('Comparison to official converter (from Table 10 in paper):')

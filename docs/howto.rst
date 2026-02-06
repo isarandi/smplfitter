@@ -274,8 +274,39 @@ indices.
 Convert Between Body Model Types
 ---------------------------------
 
-See :doc:`smpl_to_smplx` for a detailed guide on converting parameters between
-SMPL, SMPL-X, SMPL+H, etc.
+Use :class:`~smplfitter.pt.BodyConverter` to convert parameters between body model
+types (e.g., SMPL to SMPL-X). The converter uses a closed-form fitting algorithm
+that is thousands of times faster than the official SMPL-X transfer tool.
+
+.. code-block:: python
+
+   import torch
+   from smplfitter.pt import BodyModel, BodyConverter
+
+   # Create body models
+   smpl = BodyModel('smpl', 'neutral').cuda()
+   smplx = BodyModel('smplx', 'neutral').cuda()
+
+   # Create converter
+   converter = BodyConverter(smpl, smplx).cuda()
+   converter = torch.jit.script(converter)
+
+   # Convert parameters
+   result = converter.convert(
+       pose_rotvecs=smpl_pose,      # (batch, 72)
+       shape_betas=smpl_betas,      # (batch, 10)
+       trans=smpl_trans,            # (batch, 3)
+       num_iter=3,
+   )
+
+   smplx_pose = result['pose_rotvecs']   # (batch, 55*3)
+   smplx_betas = result['shape_betas']   # (batch, 10)
+   smplx_trans = result['trans']         # (batch, 3)
+
+The converter also supports:
+
+* ``known_output_pose_rotvecs``: If pose is already known, only fit shape
+* ``known_output_shape_betas``: If shape is already known, only fit pose
 
 
 Use the Convenience Functions

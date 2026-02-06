@@ -1,5 +1,3 @@
-"""NumPy inverse kinematics fitter for SMPL-family models."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -361,9 +359,7 @@ class BodyFitter:
             target_mean = np.mean(target_vertices, axis=1)
             target_vertices = target_vertices - target_mean[:, np.newaxis]
         else:
-            target_mean = np.mean(
-                np.concatenate([target_vertices, target_joints], axis=1), axis=1
-            )
+            target_mean = np.mean(np.concatenate([target_vertices, target_joints], axis=1), axis=1)
             target_vertices = target_vertices - target_mean[:, np.newaxis]
             target_joints = target_joints - target_mean[:, np.newaxis]
 
@@ -443,9 +439,7 @@ class BodyFitter:
             target_mean = np.mean(target_vertices, axis=1)
             target_vertices = target_vertices - target_mean[:, np.newaxis]
         else:
-            target_mean = np.mean(
-                np.concatenate([target_vertices, target_joints], axis=1), axis=1
-            )
+            target_mean = np.mean(np.concatenate([target_vertices, target_joints], axis=1), axis=1)
             target_vertices = target_vertices - target_mean[:, np.newaxis]
             target_joints = target_joints - target_mean[:, np.newaxis]
 
@@ -496,8 +490,13 @@ class BodyFitter:
 
         # Compute translation (and optionally scale)
         ref_scale_corr, trans = fit_scale_and_translation(
-            target_vertices, ref_verts, target_joints, ref_joints,
-            vertex_weights, joint_weights, scale=scale_fit,
+            target_vertices,
+            ref_verts,
+            target_joints,
+            ref_joints,
+            vertex_weights,
+            joint_weights,
+            scale=scale_fit,
         )
 
         # Optional final rotation adjustment
@@ -703,8 +702,12 @@ class BodyFitter:
 
         if share_beta:
             x = lstsq_partial_share(
-                A, b, w, l2_regularizer_all, l2_regularizer_rhs,
-                n_shared=self.n_betas + (1 if self.enable_kid else 0)
+                A,
+                b,
+                w,
+                l2_regularizer_all,
+                l2_regularizer_rhs,
+                n_shared=self.n_betas + (1 if self.enable_kid else 0),
             )
         else:
             x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs)
@@ -918,8 +921,13 @@ class BodyFitter:
 
 
 def fit_scale_and_translation(
-    target_vertices, reference_vertices, target_joints, reference_joints,
-    vertex_weights=None, joint_weights=None, scale=False,
+    target_vertices,
+    reference_vertices,
+    target_joints,
+    reference_joints,
+    vertex_weights=None,
+    joint_weights=None,
+    scale=False,
 ):
     if target_joints is None or reference_joints is None:
         target_both = target_vertices

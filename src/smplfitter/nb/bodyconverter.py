@@ -1,5 +1,3 @@
-"""Body model parameter converter (Numba implementation)."""
-
 from __future__ import annotations
 
 import os
@@ -36,9 +34,7 @@ class BodyConverter:
         DATA_ROOT = os.getenv('DATA_ROOT', '.')
         if self.body_model_in.num_vertices == 6890 and self.body_model_out.num_vertices == 10475:
             csr_path = f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'
-        elif (
-            self.body_model_in.num_vertices == 10475 and self.body_model_out.num_vertices == 6890
-        ):
+        elif self.body_model_in.num_vertices == 10475 and self.body_model_out.num_vertices == 6890:
             csr_path = f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'
         else:
             csr_path = None

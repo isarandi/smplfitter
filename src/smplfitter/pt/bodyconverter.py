@@ -1,5 +1,3 @@
-"""Body model parameter converter (PyTorch implementation)."""
-
 from __future__ import annotations
 import os
 import pickle

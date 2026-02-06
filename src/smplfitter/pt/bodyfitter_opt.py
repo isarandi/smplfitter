@@ -203,8 +203,7 @@ class BodyFitterOpt(nn.Module):
             if vertex_weights is not None:
                 v_diff = result['vertices'] - target_vertices
                 loss = loss + torch.mean(
-                    vertex_weights.unsqueeze(-1)
-                    * torch.linalg.norm(v_diff, dim=-1, keepdim=True)
+                    vertex_weights.unsqueeze(-1) * torch.linalg.norm(v_diff, dim=-1, keepdim=True)
                 )
             else:
                 loss = loss + torch.mean(
@@ -235,10 +234,13 @@ class BodyFitterOpt(nn.Module):
         with torch.no_grad():
             glob_rotmats_final = rot6d_to_rotmat(rot6d)
             parent_indices = self.body_model.kintree_parents_tensor[1:].to(device)
-            parent_glob = torch.cat([
-                torch.eye(3, device=device).expand(glob_rotmats_final.shape[0], 1, 3, 3),
-                glob_rotmats_final.index_select(1, parent_indices),
-            ], dim=1)
+            parent_glob = torch.cat(
+                [
+                    torch.eye(3, device=device).expand(glob_rotmats_final.shape[0], 1, 3, 3),
+                    glob_rotmats_final.index_select(1, parent_indices),
+                ],
+                dim=1,
+            )
             rel_rotmats = parent_glob.transpose(-1, -2) @ glob_rotmats_final
             pose_rotvecs = mat2rotvec(rel_rotmats).view(-1, num_joints * 3)
 

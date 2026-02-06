@@ -1,5 +1,3 @@
-"""PyTorch inverse kinematics fitter for SMPL-family models."""
-
 from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
@@ -775,7 +773,8 @@ class BodyFitter(nn.Module):
             n_given = beta_regularizer_reference.shape[1]
             if n_given < self.n_betas:
                 l2_regularizer_reference_all = torch.nn.functional.pad(
-                    beta_regularizer_reference, (0, self.n_betas - n_given))
+                    beta_regularizer_reference, (0, self.n_betas - n_given)
+                )
             else:
                 l2_regularizer_reference_all = beta_regularizer_reference
 

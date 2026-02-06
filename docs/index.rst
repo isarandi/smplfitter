@@ -123,8 +123,7 @@ This algorithm was developed for and described in the following paper:
    :caption: Contents
 
    howto
-   smpl_to_smplx
-   modules
+   API Reference <api/smplfitter/index>
 
 Indices and tables
 ==================

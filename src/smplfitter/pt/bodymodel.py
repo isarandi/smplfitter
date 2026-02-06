@@ -1,5 +1,3 @@
-"""PyTorch forward body model for SMPL-family meshes."""
-
 from __future__ import annotations
 
 from typing import Optional
