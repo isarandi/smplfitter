@@ -1,13 +1,26 @@
+from __future__ import annotations
+
+from typing import Optional
+
 import tensorflow as tf
 
 
-def lstsq(matrix, rhs, weights, l2_regularizer=None, shared=False):
+def lstsq(
+    matrix: tf.Tensor,
+    rhs: tf.Tensor,
+    weights: tf.Tensor,
+    l2_regularizer: Optional[tf.Tensor] = None,
+    l2_regularizer_rhs: Optional[tf.Tensor] = None,
+    shared: bool = False,
+) -> tf.Tensor:
     weighted_matrix = weights[..., tf.newaxis] * matrix
     regularized_gramian = tf.linalg.matmul(weighted_matrix, matrix, transpose_a=True)
     if l2_regularizer is not None:
         regularized_gramian += tf.linalg.diag(l2_regularizer)
 
     ATb = tf.linalg.matmul(weighted_matrix, rhs, transpose_a=True)
+    if l2_regularizer_rhs is not None:
+        ATb += l2_regularizer_rhs
 
     if shared:
         regularized_gramian = tf.reduce_sum(regularized_gramian, axis=0, keepdims=True)
@@ -17,13 +30,20 @@ def lstsq(matrix, rhs, weights, l2_regularizer=None, shared=False):
     return tf.linalg.cholesky_solve(chol, ATb)
 
 
-def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, n_shared=0):
+def lstsq_partial_share(
+    matrix: tf.Tensor,
+    rhs: tf.Tensor,
+    weights: tf.Tensor,
+    l2_regularizer: tf.Tensor,
+    l2_regularizer_rhs: Optional[tf.Tensor] = None,
+    n_shared: int = 0,
+) -> tf.Tensor:
     n_params = tf.shape(matrix)[-1]
     n_rhs_outputs = tf.shape(rhs)[-1]
     n_indep = n_params - n_shared
 
     if n_indep == 0:
-        result = lstsq(matrix, rhs, weights, l2_regularizer, shared=True)
+        result = lstsq(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs, shared=True)
         return tf.repeat(result, tf.shape(matrix)[0], axis=0)
 
     # Add the regularization equations into the design matrix
@@ -31,7 +51,11 @@ def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, n_shared=0):
     # we only need to implement the unregularized case,
     # and regularization is just adding more rows to the matrix.
     matrix = tf.concat([matrix, tf.eye(n_params, batch_shape=[tf.shape(matrix)[0]])], axis=1)
-    rhs = tf.pad(rhs, [[0, 0], [0, n_params], [0, 0]])
+
+    if l2_regularizer_rhs is not None:
+        rhs = tf.concat([rhs, l2_regularizer_rhs], axis=1)
+    else:
+        rhs = tf.pad(rhs, [[0, 0], [0, n_params], [0, 0]])
     weights = tf.concat(
         [weights, tf.repeat(l2_regularizer[tf.newaxis], tf.shape(matrix)[0], axis=0)], axis=1
     )

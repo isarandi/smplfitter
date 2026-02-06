@@ -1,3 +1,4 @@
+from __future__ import annotations
 # This module finds joint regressors for subsets of body model vertices.
 # That is, it finds a linear regressor that maps a subset of vertices to the joints.
 # And this is done for the post-LBS case, i.e. the vertices and joints are posed with linear
@@ -14,7 +15,7 @@
 import os
 
 import numpy as np
-import smplfitter.pt
+from .. import pt as smplfitter_pt
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -31,7 +32,7 @@ def main():
         canonical_verts = torch.from_numpy(
             np.load(f'{DATA_ROOT}/nlf/canonical_vertices_{body_model_name}.npy')
         ).float()
-        body_model = smplfitter.pt.BodyModel(body_model_name).to(DEVICE)
+        body_model = smplfitter_pt.BodyModel(body_model_name).to(DEVICE)
         dataset = RandomBodyParamDataset(num_betas=16, num_joints=body_model.num_joints)
         dataloader = DataLoader(dataset, batch_size=None, num_workers=4, pin_memory=True)
 
@@ -117,8 +118,8 @@ class ConvexCombiningRegressorTrainer:
     def train_loop(self, dataloader, total_steps, optimizer, scheduler=None):
         progress_bar = tqdm(
             total=total_steps,
-            desc="Training",
-            unit="step",
+            desc='Training',
+            unit='step',
             dynamic_ncols=True,
             initial=self.current_step,
         )
@@ -260,7 +261,7 @@ class EasyDict(dict):
             setattr(self, k, v)
         # Class attributes
         for k in self.__class__.__dict__.keys():
-            if not (k.startswith("__") and k.endswith("__")) and not k in ("update", "pop"):
+            if not (k.startswith('__') and k.endswith('__')) and k not in ('update', 'pop'):
                 setattr(self, k, getattr(self, k))
 
     def __setattr__(self, name, value):

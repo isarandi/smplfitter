@@ -1,5 +1,6 @@
+from __future__ import annotations
 import numpy as np
-from smplfitter.np.util import matmul_transp_a
+from .util import matmul_transp_a
 
 
 def kabsch(X, Y):

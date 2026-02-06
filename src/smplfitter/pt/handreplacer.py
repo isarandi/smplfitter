@@ -1,8 +1,9 @@
+from __future__ import annotations
 import torch
 import numpy as np
-from smplfitter.pt.bodymodel import BodyModel
-from smplfitter.pt.bodyfitter import BodyFitter
-from smplfitter.pt.bodyconverter import load_vertex_converter_csr, load_pickle
+from .bodymodel import BodyModel
+from .bodyfitter import BodyFitter
+from .bodyconverter import load_vertex_converter_csr, load_pickle
 import os
 import torch.nn as nn
 

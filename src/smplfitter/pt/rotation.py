@@ -1,4 +1,11 @@
+from __future__ import annotations
 import torch
+
+
+def divide_no_nan(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Safe division that returns zero (with zero gradient) where the denominator is zero."""
+    safe_b = torch.where(b == 0, torch.ones_like(b), b)
+    return torch.where(b == 0, torch.zeros_like(a / safe_b), a / safe_b)
 
 
 def kabsch(X, Y):
@@ -12,7 +19,7 @@ def kabsch(X, Y):
 
 def rotvec2mat(rotvec):
     angle = torch.linalg.norm(rotvec, dim=-1, keepdim=True)
-    axis = torch.nan_to_num(rotvec / angle)
+    axis = divide_no_nan(rotvec, angle)
 
     sin_axis = torch.sin(angle) * axis
     cos_angle = torch.cos(angle)
@@ -63,4 +70,4 @@ def mat2rotvec(rotmat):
 
     xyz, w = torch.split(q, (3, 1), dim=-1)
     norm = torch.linalg.norm(xyz, dim=-1, keepdim=True)
-    return (torch.nan_to_num(2.0 / norm) * torch.atan2(norm, w)) * xyz
+    return (divide_no_nan(torch.full_like(norm, 2.0), norm) * torch.atan2(norm, w)) * xyz

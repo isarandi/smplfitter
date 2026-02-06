@@ -1,5 +1,7 @@
+"""Left-right body parameter flipping (PyTorch implementation)."""
+
+from __future__ import annotations
 import os
-os.environ['DATA_ROOT'] = '/work_uncached/sarandi/data'
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
@@ -7,8 +9,8 @@ import scipy.optimize
 import scipy.spatial.distance
 import torch
 import torch.nn as nn
-from smplfitter.pt.bodyconverter import load_vertex_converter_csr, scipy2torch_csr
-import smplfitter.pt.bodyfitter
+from .bodyconverter import load_vertex_converter_csr, scipy2torch_csr
+from . import bodyfitter as _bodyfitter
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -25,7 +27,7 @@ class BodyFlipper(nn.Module):
     def __init__(self, body_model: 'smplfitter.pt.BodyModel'):
         super().__init__()
         self.body_model = body_model
-        self.fitter = smplfitter.pt.bodyfitter.BodyFitter(self.body_model, enable_kid=True)
+        self.fitter = _bodyfitter.BodyFitter(self.body_model, enable_kid=True)
 
         res = self.body_model.single()
         self.mirror_csr = nn.Buffer(get_mirror_csr(body_model.num_vertices))
@@ -72,12 +74,12 @@ class BodyFlipper(nn.Module):
         fit = self.fitter.fit(
             target_vertices=flipped_vertices,
             num_iter=num_iter,
-            beta_regularizer=0.0,
-            beta_regularizer2=0.0,
-            final_adjust_rots=False,
+            beta_regularizer=1e-2,
+            beta_regularizer2=1e-2,
+            final_adjust_rots=True,
             kid_regularizer=1e9 if kid_factor is None else 0.0,
             initial_pose_rotvecs=self.naive_flip_rotvecs(pose_rotvecs),
-            # initial_shape_betas=shape_betas,
+            initial_shape_betas=shape_betas,
             requested_keys=['pose_rotvecs', 'shape_betas'],
         )
         return dict(

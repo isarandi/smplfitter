@@ -1,7 +1,8 @@
+from __future__ import annotations
 import os
 
 import numpy as np
-import smplfitter.np
+from .. import np as smplfitter_np
 import trimesh
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
@@ -11,7 +12,7 @@ def main():
     DATA_ROOT = os.getenv('DATA_ROOT', default='.')
     for model_name in ['smpl', 'smplx']:
         model_root = f'{DATA_ROOT}/body_models/{model_name}'
-        bm = smplfitter.np.get_cached_body_model(model_name)
+        bm = smplfitter_np.get_cached_body_model(model_name)
         verts = bm.single()['vertices']
 
         for n in [32, 64, 128, 256, 512, 1024]:

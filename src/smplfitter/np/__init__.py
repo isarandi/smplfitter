@@ -1,12 +1,16 @@
 """NumPy implementation of body models and the model fitter."""
 
-from smplfitter.np.bodymodel import BodyModel
-from smplfitter.np.bodyfitter import BodyFitter
+from __future__ import annotations
+
+from .bodymodel import BodyModel
+from .bodyfitter import BodyFitter
+from .bodyconverter import BodyConverter
 
 import functools
 import os
 
-__all__ = ['BodyModel', 'BodyFitter', 'get_cached_body_model']
+__all__ = ['BodyModel', 'BodyFitter', 'BodyConverter', 'get_cached_body_model']
+
 
 @functools.lru_cache()
 def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):

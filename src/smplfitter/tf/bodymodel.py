@@ -1,8 +1,12 @@
+"""TensorFlow forward body model for SMPL-family meshes."""
+
+from __future__ import annotations
+
+from typing import Optional
 import tensorflow as tf
 
-import smplfitter.common
-from smplfitter.tf.rotation import mat2rotvec, rotvec2mat
-from typing import Optional
+from .. import common as smplfitter_common
+from .rotation import mat2rotvec, rotvec2mat
 
 
 class BodyModel:
@@ -10,8 +14,7 @@ class BodyModel:
     Represents a statistical body model of the SMPL family.
 
     The SMPL (Skinned Multi-Person Linear) model provides a way to represent articulated 3D
-    human
-    meshes through a compact shape vector (beta) and pose (body part rotation) parameters.
+    human meshes through a compact shape vector (beta) and pose (body part rotation) parameters.
 
     Parameters:
         model_name: Name of the model type.
@@ -21,27 +24,49 @@ class BodyModel:
             variable.
         num_betas: Number of shape parameters (betas) to use. By default, all available betas
             are used.
+        vertex_subset_size: Size of a pre-computed vertex subset to use for faster fitting.
+        vertex_subset: Custom array of vertex indices to use.
+        joint_regressor_post_lbs: Custom joint regressor matrix for post-LBS joint locations.
     """
 
-    def __init__(self, model_name='smpl', gender='neutral', model_root=None, num_betas=None):
+    def __init__(
+        self,
+        model_name='smpl',
+        gender='neutral',
+        model_root=None,
+        num_betas=None,
+        vertex_subset_size=None,
+        vertex_subset=None,
+        faces=None,
+        joint_regressor_post_lbs=None,
+    ):
         self.gender = gender
         self.model_name = model_name
-        tensors, nontensors = smplfitter.common.initialize(
-            model_name, gender, model_root, num_betas
+        data = smplfitter_common.initialize(
+            model_name,
+            gender,
+            model_root,
+            num_betas,
+            vertex_subset_size,
+            vertex_subset,
+            faces,
+            joint_regressor_post_lbs,
         )
-        self.v_template = tf.constant(tensors['v_template'], tf.float32)
-        self.shapedirs = tf.constant(tensors['shapedirs'], tf.float32)
-        self.posedirs = tf.constant(tensors['posedirs'], tf.float32)
-        self.J_regressor_post_lbs = tf.constant(tensors['J_regressor_post_lbs'], tf.float32)
-        self.J_template = tf.constant(tensors['J_template'], tf.float32)
-        self.J_shapedirs = tf.constant(tensors['J_shapedirs'], tf.float32)
-        self.kid_shapedir = tf.constant(tensors['kid_shapedir'], tf.float32)
-        self.kid_J_shapedir = tf.constant(tensors['kid_J_shapedir'], tf.float32)
-        self.weights = tf.constant(tensors['weights'], tf.float32)
-        self.kintree_parents = nontensors['kintree_parents']
-        self.faces = nontensors['faces']
-        self.num_joints = nontensors['num_joints']
-        self.num_vertices = nontensors['num_vertices']
+        self.v_template = tf.constant(data.v_template, tf.float32)
+        self.shapedirs = tf.constant(data.shapedirs, tf.float32)
+        self.posedirs = tf.constant(data.posedirs, tf.float32)
+        self.J_regressor_post_lbs = tf.constant(data.J_regressor_post_lbs, tf.float32)
+        self.J_template = tf.constant(data.J_template, tf.float32)
+        self.J_shapedirs = tf.constant(data.J_shapedirs, tf.float32)
+        self.kid_shapedir = tf.constant(data.kid_shapedir, tf.float32)
+        self.kid_J_shapedir = tf.constant(data.kid_J_shapedir, tf.float32)
+        self.weights = tf.constant(data.weights, tf.float32)
+        self.kintree_parents = data.kintree_parents
+        self.faces = data.faces
+        self.num_joints = data.num_joints
+        self.num_vertices = data.num_vertices
+        self.num_betas = self.shapedirs.shape[2]
+        self.vertex_subset = data.vertex_subset
 
     def __call__(
         self,
@@ -84,6 +109,8 @@ class BodyModel:
                     (batch_size, num_joints, 3, 3).
         """
         if isinstance(shape_betas, tf.RaggedTensor):
+            assert pose_rotvecs is not None
+            assert trans is not None
             res = self(
                 pose_rotvecs=pose_rotvecs.flat_values,
                 shape_betas=shape_betas.flat_values,
@@ -104,11 +131,12 @@ class BodyModel:
             rel_rotmats = tf.eye(3, batch_shape=[batch_size, self.num_joints])
 
         if glob_rotmats is None:
-            glob_rotmats = [rel_rotmats[:, 0]]
+            assert rel_rotmats is not None
+            glob_rotmats_list = [rel_rotmats[:, 0]]
             for i_joint in range(1, self.num_joints):
                 i_parent = self.kintree_parents[i_joint]
-                glob_rotmats.append(glob_rotmats[i_parent] @ rel_rotmats[:, i_joint])
-            glob_rotmats = tf.stack(glob_rotmats, axis=1)
+                glob_rotmats_list.append(glob_rotmats_list[i_parent] @ rel_rotmats[:, i_joint])
+            glob_rotmats = tf.stack(glob_rotmats_list, axis=1)
 
         parent_glob_rotmats = tf.concat(
             [

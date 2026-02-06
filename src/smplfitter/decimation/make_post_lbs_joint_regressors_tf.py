@@ -1,3 +1,4 @@
+from __future__ import annotations
 # This module finds joint regressors for subsets of body model vertices.
 # That is, it finds a linear regressor that maps a subset of vertices to the joints.
 # And this is done for the post-LBS case, i.e. the vertices and joints are posed with linear
@@ -17,7 +18,7 @@ import fleras
 import fleras.callbacks
 import fleras.optimizers
 import numpy as np
-import smplfitter.tf
+from .. import tf as smplfitter_tf
 import tensorflow as tf
 from fleras import EasyDict
 
@@ -32,17 +33,19 @@ def main():
         out_path = (
             f'{DATA_ROOT}/body_models/smpl/vertex_subset_joint_regr_post_lbs_{n_verts_subset}_.npy'
         )
-        #if os.path.exists(out_path):
+        # if os.path.exists(out_path):
         #    print(f'File {out_path} already exists, skipping')
         #    continue
         if n_verts_subset == 6890:
             i_verts = np.arange(6890)
         else:
-            vertex_subset = np.load(f'{DATA_ROOT}/body_models/smpl/vertex_subset_{n_verts_subset}.npz')
+            vertex_subset = np.load(
+                f'{DATA_ROOT}/body_models/smpl/vertex_subset_{n_verts_subset}.npz'
+            )
             i_verts = vertex_subset['i_verts']
 
         model = ConvexCombiningRegressor(n_verts_subset, 24)
-        bm = smplfitter.tf.get_cached_body_model('smpl', 'neutral')
+        bm = smplfitter_tf.get_cached_body_model('smpl', 'neutral')
         trainer = ConvexCombiningRegressorTrainer(
             model,
             regul_lambda=3e-5,
@@ -215,7 +218,7 @@ class ConvexCombinationLayer(tf.keras.layers.Layer):
         )
 
     def call(self, inputs):
-        return tf.einsum("bjc,jJ->bJc", inputs, self.get_w())
+        return tf.einsum('bjc,jJ->bJc', inputs, self.get_w())
 
     def get_w(self):
         return normalize_weights(tf.nn.softplus(self.w) * self.weight_mask)

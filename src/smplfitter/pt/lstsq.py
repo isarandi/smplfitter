@@ -1,5 +1,7 @@
-import torch
+from __future__ import annotations
+
 from typing import Optional
+import torch
 
 
 def lstsq(
@@ -13,11 +15,11 @@ def lstsq(
     weighted_matrix = weights.unsqueeze(-1) * matrix
     regularized_gramian = weighted_matrix.mT @ matrix
     if l2_regularizer is not None:
-        regularized_gramian.diagonal(dim1=-2, dim2=-1).add_(l2_regularizer)
+        regularized_gramian = regularized_gramian + torch.diag(l2_regularizer)
 
     ATb = weighted_matrix.mT @ rhs
     if l2_regularizer_rhs is not None:
-        ATb += l2_regularizer_rhs
+        ATb = ATb + l2_regularizer_rhs
 
     if shared:
         regularized_gramian = regularized_gramian.sum(dim=0, keepdim=True)
@@ -81,7 +83,7 @@ def lstsq_partial_share(
     )
 
     # Finally, update the estimate for the independent params
-    coeff_indep2rhs -= coeff_indep2shared @ coeff_shared2rhs
+    coeff_indep2rhs = coeff_indep2rhs - coeff_indep2shared @ coeff_shared2rhs
 
     # Repeat the shared coefficients for each sample and concatenate them with the independent ones
     coeff_shared2rhs = coeff_shared2rhs.expand(matrix.shape[0], -1, -1)

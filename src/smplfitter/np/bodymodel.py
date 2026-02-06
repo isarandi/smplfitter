@@ -1,9 +1,13 @@
+"""NumPy forward body model for SMPL-family meshes."""
+
+from __future__ import annotations
+
 from typing import Optional
 
 import numpy as np
-import smplfitter.common
-from smplfitter.np.rotation import mat2rotvec, rotvec2mat
-from smplfitter.np.util import matmul_transp_a
+from .. import common as smplfitter_common
+from .rotation import mat2rotvec, rotvec2mat
+from .util import matmul_transp_a
 
 
 class BodyModel:
@@ -21,27 +25,52 @@ class BodyModel:
             variable, or if a DATA_ROOT envvar doesn't exist, ``./body_models/{model_name}``.
         num_betas: Number of shape parameters (betas) to use. By default, all available betas are
             used.
+        vertex_subset_size: If specified, loads a pre-computed vertex subset of this size from
+            ``{model_root}/vertex_subset_{size}.npz``.
+        vertex_subset: Array of vertex indices to use. If specified, only these vertices will be
+            computed.
+        faces: Custom faces array to use instead of the default.
+        joint_regressor_post_lbs: Custom joint regressor for post-LBS joint computation.
     """
 
-    def __init__(self, model_name='smpl', gender='neutral', model_root=None, num_betas=None):
+    def __init__(
+        self,
+        model_name='smpl',
+        gender='neutral',
+        model_root=None,
+        num_betas=None,
+        vertex_subset_size=None,
+        vertex_subset=None,
+        faces=None,
+        joint_regressor_post_lbs=None,
+    ):
         self.gender = gender
         self.model_name = model_name
-        tensors, nontensors = smplfitter.common.initialize(
-            model_name, gender, model_root, num_betas
+        data = smplfitter_common.initialize(
+            model_name,
+            gender,
+            model_root,
+            num_betas,
+            vertex_subset_size,
+            vertex_subset,
+            faces,
+            joint_regressor_post_lbs,
         )
-        self.v_template = np.array(tensors['v_template'], np.float32)
-        self.shapedirs = np.array(tensors['shapedirs'], np.float32)
-        self.posedirs = np.array(tensors['posedirs'], np.float32)
-        self.J_regressor_post_lbs = np.array(tensors['J_regressor_post_lbs'], np.float32)
-        self.J_template = np.array(tensors['J_template'], np.float32)
-        self.J_shapedirs = np.array(tensors['J_shapedirs'], np.float32)
-        self.kid_shapedir = np.array(tensors['kid_shapedir'], np.float32)
-        self.kid_J_shapedir = np.array(tensors['kid_J_shapedir'], np.float32)
-        self.weights = np.array(tensors['weights'], np.float32)
-        self.kintree_parents = nontensors['kintree_parents']
-        self.faces = nontensors['faces']
-        self.num_joints = nontensors['num_joints']
-        self.num_vertices = nontensors['num_vertices']
+        self.v_template = np.array(data.v_template, np.float32)
+        self.shapedirs = np.array(data.shapedirs, np.float32)
+        self.posedirs = np.array(data.posedirs, np.float32)
+        self.J_regressor_post_lbs = np.array(data.J_regressor_post_lbs, np.float32)
+        self.J_template = np.array(data.J_template, np.float32)
+        self.J_shapedirs = np.array(data.J_shapedirs, np.float32)
+        self.kid_shapedir = np.array(data.kid_shapedir, np.float32)
+        self.kid_J_shapedir = np.array(data.kid_J_shapedir, np.float32)
+        self.weights = np.array(data.weights, np.float32)
+        self.kintree_parents = data.kintree_parents
+        self.faces = data.faces
+        self.num_joints = data.num_joints
+        self.num_vertices = data.num_vertices
+        self.vertex_subset = data.vertex_subset
+        self.num_betas = self.shapedirs.shape[2]
 
     def __call__(
         self,
@@ -85,7 +114,7 @@ class BodyModel:
 
         """
 
-        batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats)
+        batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
 
         if rel_rotmats is not None:
             rel_rotmats = np.asarray(rel_rotmats, np.float32)
@@ -96,11 +125,12 @@ class BodyModel:
             rel_rotmats = np.tile(np.eye(3, dtype=np.float32), [batch_size, self.num_joints, 1, 1])
 
         if glob_rotmats is None:
-            glob_rotmats = [rel_rotmats[:, 0]]
+            assert rel_rotmats is not None
+            glob_rotmats_list = [rel_rotmats[:, 0]]
             for i_joint in range(1, self.num_joints):
                 i_parent = self.kintree_parents[i_joint]
-                glob_rotmats.append(glob_rotmats[i_parent] @ rel_rotmats[:, i_joint])
-            glob_rotmats = np.stack(glob_rotmats, axis=1)
+                glob_rotmats_list.append(glob_rotmats_list[i_parent] @ rel_rotmats[:, i_joint])
+            glob_rotmats = np.stack(glob_rotmats_list, axis=1)
 
         parent_indices1 = self.kintree_parents[1:]
         parent_glob_rotmats1 = glob_rotmats[:, parent_indices1]
@@ -119,7 +149,7 @@ class BodyModel:
         if kid_factor is None:
             kid_factor = np.zeros((1,), np.float32)
         else:
-            kid_factor = np.float32(kid_factor)
+            kid_factor = np.asarray(kid_factor, np.float32)
 
         j = (
             self.J_template
@@ -260,10 +290,10 @@ class BodyModel:
         return new_pose_rotvec, new_trans
 
 
-def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats):
+def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats=None):
     batch_sizes = [
         np.asarray(x).shape[0]
-        for x in [pose_rotvecs, shape_betas, trans, rel_rotmats]
+        for x in [pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats]
         if x is not None
     ]
 

@@ -1,15 +1,19 @@
+from __future__ import annotations
 import numpy as np
 import scipy
-from smplfitter.np.util import matmul_transp_a
+from .util import matmul_transp_a
 
 
-def lstsq(matrix, rhs, weights, l2_regularizer=None, shared=False):
+def lstsq(matrix, rhs, weights, l2_regularizer=None, l2_regularizer_rhs=None, shared=False):
     weighted_matrix = weights[..., np.newaxis] * matrix
     regularized_gramian = matmul_transp_a(weighted_matrix, matrix)
     if l2_regularizer is not None:
         regularized_gramian += np.diag(l2_regularizer)
 
     ATb = matmul_transp_a(weighted_matrix, rhs)
+
+    if l2_regularizer_rhs is not None:
+        ATb = ATb + l2_regularizer_rhs
 
     if shared:
         regularized_gramian = np.sum(regularized_gramian, axis=0, keepdims=True)
@@ -19,12 +23,15 @@ def lstsq(matrix, rhs, weights, l2_regularizer=None, shared=False):
     return cholesky_solve(chol, ATb)
 
 
-def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, n_shared=0):
+def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs=None, n_shared=0):
     n_params = matrix.shape[-1]
     matrix = np.concatenate(
         [matrix, np.eye(n_params)[np.newaxis, ...].repeat(matrix.shape[0], axis=0)], axis=1
     )
-    rhs = np.pad(rhs, ((0, 0), (0, n_params), (0, 0)))
+    if l2_regularizer_rhs is not None:
+        rhs = np.concatenate([rhs, l2_regularizer_rhs], axis=1)
+    else:
+        rhs = np.pad(rhs, ((0, 0), (0, n_params), (0, 0)))
     weights = np.concatenate(
         [weights, np.repeat(l2_regularizer[np.newaxis], matrix.shape[0], axis=0)], axis=1
     )

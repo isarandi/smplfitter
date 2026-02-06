@@ -1,11 +1,67 @@
+from __future__ import annotations
+
 import contextlib
 import os
 import os.path as osp
 import pickle
 import sys
 import warnings
+from dataclasses import dataclass
 
 import numpy as np
+
+
+@dataclass
+class ModelData:
+    """Data loaded from a SMPL-family body model file.
+
+    This dataclass holds all arrays and metadata needed to instantiate a body model
+    in any backend (NumPy, PyTorch, TensorFlow, JAX, Numba).
+    """
+
+    # Tensor data (numpy arrays, to be converted to framework-specific tensors)
+    v_template: np.ndarray
+    """Vertex template in T-pose, shape (num_vertices, 3)."""
+
+    shapedirs: np.ndarray
+    """Shape blend shapes, shape (num_vertices, 3, num_betas)."""
+
+    posedirs: np.ndarray
+    """Pose blend shapes, shape (num_vertices, 3, (num_joints-1)*9)."""
+
+    J_regressor_post_lbs: np.ndarray
+    """Joint regressor for post-LBS joint locations, shape (num_joints, num_vertices)."""
+
+    J_template: np.ndarray
+    """Joint template positions, shape (num_joints, 3)."""
+
+    J_shapedirs: np.ndarray
+    """Joint shape directions, shape (num_joints, 3, num_betas)."""
+
+    kid_shapedir: np.ndarray
+    """Kid shape blend shape for vertices, shape (num_vertices, 3)."""
+
+    kid_J_shapedir: np.ndarray
+    """Kid shape blend shape for joints, shape (num_joints, 3)."""
+
+    weights: np.ndarray
+    """Skinning weights, shape (num_vertices, num_joints)."""
+
+    # Non-tensor data (metadata)
+    kintree_parents: list[int]
+    """Parent joint indices for kinematic tree."""
+
+    faces: np.ndarray
+    """Face indices, shape (num_faces, 3)."""
+
+    num_joints: int
+    """Number of joints in the body model."""
+
+    num_vertices: int
+    """Number of vertices in the body model mesh."""
+
+    vertex_subset: np.ndarray
+    """Indices of vertices used (for partial models)."""
 
 
 def initialize(
@@ -39,6 +95,9 @@ def initialize(
         elif model_name == 'smplh16':
             gender_str = dict(f='female', m='male', n='neutral')[gender[0]]
             smpl_data = np.load(osp.join(model_root, gender_str, 'model.npz'))
+        elif model_name == 'mano':
+            with open(osp.join(model_root, 'MANO_RIGHT.pkl'), 'rb') as f:
+                smpl_data = pickle.load(f, encoding='latin1')
         else:
             raise ValueError(f'Unknown model name: {model_name}')
 
@@ -60,9 +119,15 @@ def initialize(
 
     # Kid model has an additional shape parameter which pulls the mesh towards the SMIL mean
     # template
-    v_template_smil = np.load(os.path.join(model_root, 'kid_template.npy')).astype(np.float64)
-    res['kid_shapedir'] = v_template_smil - np.mean(v_template_smil, axis=0) - res['v_template']
-    res['kid_J_shapedir'] = res['J_regressor'] @ res['kid_shapedir']
+    if model_name.lower().startswith('smpl'):
+        v_template_smil = np.load(os.path.join(model_root, 'kid_template.npy')).astype(np.float64)
+        res['kid_shapedir'] = (
+            v_template_smil - np.mean(v_template_smil, axis=0) - res['v_template']
+        )
+        res['kid_J_shapedir'] = res['J_regressor'] @ res['kid_shapedir']
+    else:
+        res['kid_shapedir'] = np.zeros_like(res['v_template'])
+        res['kid_J_shapedir'] = np.zeros((res['num_joints'], 3))
 
     if 'J_shapedirs' in smpl_data:
         res['J_shapedirs'] = np.array(smpl_data['J_shapedirs'], dtype=np.float64)
@@ -99,27 +164,22 @@ def initialize(
     if joint_regressor_post_lbs is None:
         joint_regressor_post_lbs = res['J_regressor']
 
-    tensors = {
-        'v_template': res['v_template'][vertex_subset],
-        'shapedirs': res['shapedirs'][vertex_subset, :, :num_betas],
-        'posedirs': res['posedirs'][vertex_subset],
-        'J_regressor_post_lbs': joint_regressor_post_lbs,
-        'J_template': res['J_template'],
-        'J_shapedirs': res['J_shapedirs'][:, :, :num_betas],
-        'kid_shapedir': res['kid_shapedir'][vertex_subset],
-        'kid_J_shapedir': res['kid_J_shapedir'],
-        'weights': res['weights'][vertex_subset],
-    }
-
-    nontensors = {
-        'kintree_parents': res['kintree_parents'],
-        'faces': faces,
-        'num_joints': res['num_joints'],
-        'num_vertices': len(vertex_subset),
-        'vertex_subset': vertex_subset,
-    }
-
-    return tensors, nontensors
+    return ModelData(
+        v_template=res['v_template'][vertex_subset],
+        shapedirs=res['shapedirs'][vertex_subset, :, :num_betas],
+        posedirs=res['posedirs'][vertex_subset],
+        J_regressor_post_lbs=joint_regressor_post_lbs,
+        J_template=res['J_template'],
+        J_shapedirs=res['J_shapedirs'][:, :, :num_betas],
+        kid_shapedir=res['kid_shapedir'][vertex_subset],
+        kid_J_shapedir=res['kid_J_shapedir'],
+        weights=res['weights'][vertex_subset],
+        kintree_parents=res['kintree_parents'],
+        faces=faces,
+        num_joints=res['num_joints'],
+        num_vertices=len(vertex_subset),
+        vertex_subset=vertex_subset,
+    )
 
 
 @contextlib.contextmanager
@@ -133,15 +193,15 @@ def monkey_patched_for_chumpy():
             try:
                 sys.modules[f'numpy.{name}'] = getattr(np, name + '_')
                 added.append(name)
-            except:
+            except AttributeError:
                 pass
 
     sys.modules['numpy.float'] = float
     sys.modules['numpy.complex'] = np.complex128
     sys.modules['numpy.NINF'] = -np.inf
-    np.NINF = -np.inf
-    np.complex = np.complex128
-    np.float = float
+    np.NINF = -np.inf  # type: ignore[misc]
+    np.complex = np.complex128  # type: ignore[misc]
+    np.float = float  # type: ignore[misc]
 
     if 'unicode' not in dir(np):
         sys.modules['numpy.unicode'] = np.str_
@@ -163,4 +223,3 @@ def monkey_patched_for_chumpy():
 
     if added_getargspec:
         del inspect.getargspec
-

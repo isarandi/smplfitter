@@ -1,7 +1,20 @@
-"""SMPLFitter contains three main submodules: :mod:`smplfitter.np`, :mod:`smplfitter.pt`,
-:mod:`smplfitter.tf`, which provide the forward and inverse functions for SMPL-like body models
-implemented in NumPy, PyTorch, and TensorFlow, respectively.
+"""SMPLFitter provides forward and inverse kinematics for SMPL-family body models.
+
+Main submodules:
+- :mod:`smplfitter.np` - NumPy backend
+- :mod:`smplfitter.pt` - PyTorch backend
+- :mod:`smplfitter.tf` - TensorFlow backend
+- :mod:`smplfitter.jax` - JAX backend
+- :mod:`smplfitter.nb` - Numba backend
 """
 
-VERSION = (0, 2, 0)  # PEP 386
-__version__ = ".".join([str(x) for x in VERSION])
+from __future__ import annotations
+
+from .common import ModelData, initialize
+
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = '0.0.0'
+
+__all__ = ['ModelData', 'initialize', '__version__']

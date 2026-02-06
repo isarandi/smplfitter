@@ -1,10 +1,14 @@
+"""PyTorch inverse kinematics fitter for SMPL-family models."""
+
+from __future__ import annotations
+
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import torch
 import torch.nn as nn
-from smplfitter.pt.lstsq import lstsq, lstsq_partial_share
-from smplfitter.pt.rotation import kabsch, mat2rotvec, rotvec2mat
+from .lstsq import lstsq, lstsq_partial_share
+from .rotation import kabsch, mat2rotvec, rotvec2mat
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -30,6 +34,20 @@ class BodyFitter(nn.Module):
         self.body_model = body_model
         self.n_betas = self.body_model.shapedirs.shape[2]
         self.enable_kid = enable_kid
+        self.is_smpl_family = body_model.model_name.startswith('smpl')
+
+        part_assignment = torch.argmax(body_model.weights, dim=1)
+        if self.is_smpl_family:
+            part_assignment = torch.where(
+                part_assignment == 10, torch.tensor(7, dtype=torch.int64), part_assignment
+            )
+            part_assignment = torch.where(
+                part_assignment == 11, torch.tensor(8, dtype=torch.int64), part_assignment
+            )
+        self.part_assignment = nn.Buffer(part_assignment)
+        self.part_vertex_selectors = [
+            torch.where(part_assignment == i)[0] for i in range(body_model.num_joints)
+        ]
 
         self.default_mesh_tf = nn.Buffer(body_model.single()['vertices'])
 
@@ -62,7 +80,6 @@ class BodyFitter(nn.Module):
         joint_weights: Optional[torch.Tensor] = None,
         num_iter: int = 1,
         beta_regularizer: float = 1,
-        beta_regularizer1: float = 0,
         beta_regularizer2: float = 0,
         scale_regularizer: float = 0,
         kid_regularizer: Optional[float] = None,
@@ -89,9 +106,7 @@ class BodyFitter(nn.Module):
             beta_regularizer: L2 regularization weight for shape parameters (betas).
                 Set small for easy poses and extreme body shapes, set high for harder poses and
                 non-extreme body shape. (Good choices can be 0, 0.1, 1, 10.)
-            beta_regularizer1: Regularization for the first beta. Often zero works well.
-            beta_regularizer2: Secondary regularization for betas, affecting the first two
-                parameters if beta_regularizer1 is not given else only the second. Often zero works well.
+            beta_regularizer2: Regularization for the first two betas. Often zero works well.
             scale_regularizer: Regularization term to penalize the scale factor deviating from 1.
                 Has no effect unless `scale_target` or `scale_fit` is True.
             kid_regularizer: Regularization weight for the kid blendshape factor. Has no effect
@@ -179,7 +194,6 @@ class BodyFitter(nn.Module):
                 vertex_weights,
                 joint_weights,
                 beta_regularizer,
-                beta_regularizer1,
                 beta_regularizer2,
                 scale_regularizer=0.0,
                 kid_regularizer=kid_regularizer,
@@ -194,6 +208,7 @@ class BodyFitter(nn.Module):
             )
             ref_verts = result['vertices']
             ref_joints = result['joints'] if target_joints is not None else None
+
             glob_rotmats = (
                 self._fit_global_rotations(
                     target_vertices,
@@ -213,7 +228,6 @@ class BodyFitter(nn.Module):
             vertex_weights,
             joint_weights,
             beta_regularizer,
-            beta_regularizer1,
             beta_regularizer2,
             scale_regularizer,
             kid_regularizer,
@@ -282,8 +296,13 @@ class BodyFitter(nn.Module):
                     ref_kid_factor,
                 )
 
-        # Add the mean back
-        result['trans'] = ref_trans + target_mean
+        # Add the mean back (scaled appropriately if using scale correction)
+        if scale_target:
+            result['trans'] = ref_trans + target_mean * result['scale_corr'][:, None]
+        elif scale_fit:
+            result['trans'] = ref_trans + target_mean / result['scale_corr'][:, None]
+        else:
+            result['trans'] = ref_trans + target_mean
         result['orientations'] = glob_rotmats
 
         # Provide other requested rotation formats
@@ -381,9 +400,6 @@ class BodyFitter(nn.Module):
             target_vertices = target_vertices - target_mean[:, None]
             target_joints = target_joints - target_mean[:, None]
 
-        device = self.body_model.v_template.device
-        parent_indices = self.body_model.kintree_parents_tensor[1:].to(device)
-
         rel_rotmats = rotvec2mat(pose_rotvecs.view(-1, self.body_model.num_joints, 3))
         glob_rotmats_ = [rel_rotmats[:, 0]]
         for i_joint in range(1, self.body_model.num_joints):
@@ -399,7 +415,6 @@ class BodyFitter(nn.Module):
             joint_weights,
             beta_regularizer,
             beta_regularizer2,
-            beta_regularizer2,
             scale_regularizer,
             kid_regularizer,
             share_beta,
@@ -413,8 +428,10 @@ class BodyFitter(nn.Module):
 
         # Add the mean back
         result['trans'] = result['trans'] + target_mean
-        result.pop('vertices')
-        result.pop('joints')
+        if 'vertices' in result:
+            result.pop('vertices')
+        if 'joints' in result:
+            result.pop('joints')
         result_non_none: dict[str, torch.Tensor] = {}
         for k, v in result.items():
             if v is not None:
@@ -614,7 +631,6 @@ class BodyFitter(nn.Module):
         vertex_weights: Optional[torch.Tensor] = None,
         joint_weights: Optional[torch.Tensor] = None,
         beta_regularizer: float = 1,
-        beta_regularizer1: float = 0,
         beta_regularizer2: float = 0,
         scale_regularizer: float = 0,
         kid_regularizer: Optional[float] = None,
@@ -626,7 +642,7 @@ class BodyFitter(nn.Module):
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, torch.Tensor]:
         if scale_target and scale_fit:
-            raise ValueError("Only one of estim_scale_target and estim_scale_fit can be True")
+            raise ValueError('Only one of estim_scale_target and estim_scale_fit can be True')
         if requested_keys is None:
             requested_keys = []
 
@@ -645,17 +661,17 @@ class BodyFitter(nn.Module):
         )
         rel_rotmats = torch.matmul(parent_glob_rot_mats.transpose(-1, -2), glob_rotmats)
 
-        glob_positions_ext = [self.J_template_ext[None, 0].expand(batch_size, -1, -1)]
+        glob_positions_ext_list = [self.J_template_ext[None, 0].expand(batch_size, -1, -1)]
         for i_joint, i_parent in enumerate(self.body_model.kintree_parents[1:], start=1):
-            glob_positions_ext.append(
-                glob_positions_ext[i_parent]
+            glob_positions_ext_list.append(
+                glob_positions_ext_list[i_parent]
                 + torch.einsum(
                     'bCc,cs->bCs',
                     glob_rotmats[:, i_parent],
                     self.J_template_ext[i_joint] - self.J_template_ext[i_parent],
                 )
             )
-        glob_positions_ext = torch.stack(glob_positions_ext, dim=1)
+        glob_positions_ext = torch.stack(glob_positions_ext_list, dim=1)
         translations_ext = glob_positions_ext - torch.einsum(
             'bjCc,jcs->bjCs', glob_rotmats, self.J_template_ext
         )
@@ -727,11 +743,18 @@ class BodyFitter(nn.Module):
         # print('A shape:', A.shape)
         # print('b shape:', b.shape)
         # print('weights shape:', weights.shape)
-        mean_A = torch.sum(
-            weights.unsqueeze(-1).unsqueeze(-1) * A, dim=1, keepdim=True
-        ) / torch.sum(weights.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=True)
-        mean_b = torch.sum(weights.unsqueeze(-1) * b, dim=1, keepdim=True) / torch.sum(
-            weights.unsqueeze(-1), dim=1, keepdim=True
+
+        w_sum_A = torch.sum(weights.unsqueeze(-1).unsqueeze(-1), dim=1, keepdim=True)
+        w_sum_b = torch.sum(weights.unsqueeze(-1), dim=1, keepdim=True)
+        mean_A = torch.where(
+            w_sum_A == 0,
+            torch.zeros_like(w_sum_A),
+            torch.sum(weights.unsqueeze(-1).unsqueeze(-1) * A, dim=1, keepdim=True) / w_sum_A,
+        )
+        mean_b = torch.where(
+            w_sum_b == 0,
+            torch.zeros_like(w_sum_b),
+            torch.sum(weights.unsqueeze(-1) * b, dim=1, keepdim=True) / w_sum_b,
         )
         A = A - mean_A
         b = b - mean_b
@@ -742,15 +765,19 @@ class BodyFitter(nn.Module):
 
         l2_regularizer_all = torch.cat(
             [
-                torch.full((1,), beta_regularizer1, device=device),
-                torch.full((1,), beta_regularizer2, device=device),
+                torch.full((2,), beta_regularizer2, device=device),
                 torch.full((self.n_betas - 2,), beta_regularizer, device=device),
             ]
         )
         if beta_regularizer_reference is None:
             l2_regularizer_reference_all = torch.zeros([batch_size, self.n_betas], device=device)
         else:
-            l2_regularizer_reference_all = beta_regularizer_reference
+            n_given = beta_regularizer_reference.shape[1]
+            if n_given < self.n_betas:
+                l2_regularizer_reference_all = torch.nn.functional.pad(
+                    beta_regularizer_reference, (0, self.n_betas - n_given))
+            else:
+                l2_regularizer_reference_all = beta_regularizer_reference
 
         if self.enable_kid:
             if kid_regularizer is None:
@@ -776,9 +803,9 @@ class BodyFitter(nn.Module):
 
         # l2_regularizer_all = torch.diag(l2_regularizer_all)
         # print('Loading penalty matrix')
-        # penalty = np.load('/work_uncached/sarandi/data/projects/localizerfields
+        # penalty = np.load('/work/sarandi/data/projects/localizerfields
         # /smpl_beta_penalty_mat_new.npy')
-        # penalty_bone = np.load('/work_uncached/sarandi/data/projects/localizerfields
+        # penalty_bone = np.load('/work/sarandi/data/projects/localizerfields
         # /smpl_beta_penalty_mat_bone_new.npy')
         # l2_regularizer_all[:self.n_betas, :self.n_betas] = torch.tensor(penalty, device=device)
         # * beta_regularizer + torch.tensor(penalty_bone, device=device) * beta_regularizer2
@@ -792,6 +819,7 @@ class BodyFitter(nn.Module):
                 l2_regularizer_rhs=l2_regularizer_rhs,
                 n_shared=self.n_betas + (1 if self.enable_kid else 0),
             )
+
         else:
             x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs=l2_regularizer_rhs)
 
@@ -812,9 +840,9 @@ class BodyFitter(nn.Module):
         if scale_target or scale_fit:
             new_scale_corr = x[:, -1] + 1
             if scale_fit and new_scale_corr is not None:
-                new_shape /= new_scale_corr.unsqueeze(-1)
+                new_shape = new_shape / new_scale_corr.unsqueeze(-1)
                 if new_kid_factor is not None:
-                    new_kid_factor /= new_scale_corr
+                    new_kid_factor = new_kid_factor / new_scale_corr
             result['scale_corr'] = new_scale_corr
         else:
             new_scale_corr = None
@@ -847,7 +875,7 @@ class BodyFitter(nn.Module):
         joint_weights: Optional[torch.Tensor],
     ) -> torch.Tensor:
         device = target_vertices.device
-        glob_rots = []
+        glob_rots: list[torch.Tensor] = []
         mesh_weight = torch.tensor(1e-6, device=device, dtype=torch.float32)
         joint_weight = 1 - mesh_weight
 
@@ -855,29 +883,17 @@ class BodyFitter(nn.Module):
             target_joints = self.body_model.J_regressor_post_lbs @ target_vertices
             reference_joints = self.body_model.J_regressor_post_lbs @ reference_vertices
 
-        part_assignment = torch.argmax(self.body_model.weights, dim=1)
-        # Disable the rotation of toes separately from the feet
-        part_assignment = torch.where(
-            part_assignment == 10,
-            torch.tensor(7, dtype=torch.int64, device=device),
-            part_assignment,
-        )
-        part_assignment = torch.where(
-            part_assignment == 11,
-            torch.tensor(8, dtype=torch.int64, device=device),
-            part_assignment,
-        )
-
         for i in range(self.body_model.num_joints):
-            # Disable the rotation of toes separately from the feet
-            if i == 10:
-                glob_rots.append(glob_rots[7])
-                continue
-            elif i == 11:
-                glob_rots.append(glob_rots[8])
-                continue
+            if self.is_smpl_family:
+                # Disable the rotation of toes separately from the feet
+                if i == 10:
+                    glob_rots.append(glob_rots[7])
+                    continue
+                elif i == 11:
+                    glob_rots.append(glob_rots[8])
+                    continue
 
-            selector = torch.where(part_assignment == i)[0]
+            selector = self.part_vertex_selectors[i]
             default_body_part = reference_vertices[:, selector]
             estim_body_part = target_vertices[:, selector]
             weights_body_part = (
@@ -931,36 +947,26 @@ class BodyFitter(nn.Module):
         trans: torch.Tensor,
         kid_factor: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        glob_rots = []
+        glob_rots: list[torch.Tensor] = []
 
         true_reference_joints = reference_joints
         if target_joints is None or reference_joints is None:
             target_joints = self.body_model.J_regressor_post_lbs @ target_vertices
             reference_joints = self.body_model.J_regressor_post_lbs @ reference_vertices
+        if true_reference_joints is None:
+            true_reference_joints = reference_joints
 
         device = self.body_model.v_template.device
-        part_assignment = torch.argmax(self.body_model.weights, dim=1)
-        part_assignment = torch.where(
-            part_assignment == 10,
-            torch.tensor(7, dtype=torch.int64, device=device),
-            part_assignment,
-        )
-        part_assignment = torch.where(
-            part_assignment == 11,
-            torch.tensor(8, dtype=torch.int64, device=device),
-            part_assignment,
-        )
-
         j = self.body_model.J_template + torch.einsum(
             'jcs,...s->...jc',
             self.body_model.J_shapedirs,
             shape_betas[:, : self.n_betas],
         )
         if kid_factor is not None:
-            j += torch.einsum('jc,...->...jc', self.body_model.kid_J_shapedir, kid_factor)
+            j = j + torch.einsum('jc,...->...jc', self.body_model.kid_J_shapedir, kid_factor)
 
         if scale_corr is not None:
-            j *= scale_corr
+            j = j * scale_corr
 
         parent_indices = self.body_model.kintree_parents_tensor[1:].to(device)
         j_parent = torch.cat(
@@ -972,7 +978,7 @@ class BodyFitter(nn.Module):
         )
         bones = j - j_parent
 
-        glob_positions = []
+        glob_positions: list[torch.Tensor] = []
 
         for i in range(self.body_model.num_joints):
             if i == 0:
@@ -984,17 +990,18 @@ class BodyFitter(nn.Module):
                 ).squeeze(-1)
             glob_positions.append(glob_position)
 
-            if i == 10:
-                glob_rots.append(glob_rots[7])
-                continue
-            elif i == 11:
-                glob_rots.append(glob_rots[8])
-                continue
-            elif i not in [1, 2, 4, 5, 7, 8, 16, 17, 18, 19]:
-                glob_rots.append(glob_rots_prev[:, i])
-                continue
+            if self.is_smpl_family:
+                if i == 10:
+                    glob_rots.append(glob_rots[7])
+                    continue
+                elif i == 11:
+                    glob_rots.append(glob_rots[8])
+                    continue
+                elif i not in [1, 2, 4, 5, 7, 8, 16, 17, 18, 19]:
+                    glob_rots.append(glob_rots_prev[:, i])
+                    continue
 
-            vertex_selector = torch.where(part_assignment == i)[0]
+            vertex_selector = self.part_vertex_selectors[i]
             joint_selector = self.children_and_self[i]
 
             default_body_part = reference_vertices[:, vertex_selector]
@@ -1064,7 +1071,7 @@ def fit_scale_and_translation(
                 device=device,
             )
 
-    weights_both /= torch.sum(weights_both, dim=1, keepdim=True)
+    weights_both = weights_both / torch.sum(weights_both, dim=1, keepdim=True)
 
     weighted_mean_target = torch.sum(target_both * weights_both.unsqueeze(-1), dim=1)
     weighted_mean_reference = torch.sum(reference_both * weights_both.unsqueeze(-1), dim=1)

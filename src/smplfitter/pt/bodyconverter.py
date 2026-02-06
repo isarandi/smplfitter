@@ -1,3 +1,6 @@
+"""Body model parameter converter (PyTorch implementation)."""
+
+from __future__ import annotations
 import os
 import pickle
 from typing import Optional, TYPE_CHECKING
@@ -5,7 +8,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 import torch
 import torch.nn as nn
-import smplfitter.pt.bodyfitter
+from . import bodyfitter as _bodyfitter
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -28,7 +31,7 @@ class BodyConverter(nn.Module):
         super().__init__()
         self.body_model_in = body_model_in
         self.body_model_out = body_model_out
-        self.fitter = smplfitter.pt.bodyfitter.BodyFitter(self.body_model_out, enable_kid=True)
+        self.fitter = _bodyfitter.BodyFitter(self.body_model_out, enable_kid=True)
 
         DATA_ROOT = os.getenv('DATA_ROOT', '.')
         if self.body_model_in.num_vertices == 6890 and self.body_model_out.num_vertices == 10475:
@@ -38,6 +41,7 @@ class BodyConverter(nn.Module):
         else:
             csr_path = None
 
+        self.vertex_converter_csr: Optional[nn.Buffer]
         if csr_path is not None:
             self.vertex_converter_csr = nn.Buffer(
                 scipy2torch_csr(load_vertex_converter_csr(csr_path))
