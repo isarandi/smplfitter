@@ -75,31 +75,49 @@ def initialize(
     joint_regressor_post_lbs=None,
 ):
     if model_root is None:
-        DATA_ROOT = os.getenv('DATA_ROOT', default='.')
-        model_root = f'{DATA_ROOT}/body_models/{model_name}'
+        body_models_dir = os.getenv('SMPLFITTER_BODY_MODELS')
+        if body_models_dir is None:
+            data_root = os.getenv('DATA_ROOT', '.')
+            body_models_dir = f'{data_root}/body_models'
+        model_root = f'{body_models_dir}/{model_name}'
 
     with monkey_patched_for_chumpy():
         if model_name == 'smpl':
             gender_str = dict(f='f', m='m', n='neutral')[gender[0]]
             filename = f'basicmodel_{gender_str}_lbs_10_207_0_v1.1.0.pkl'
-            with open(osp.join(model_root, filename), 'rb') as f:
-                smpl_data = pickle.load(f, encoding='latin1')
         elif model_name in ('smplx', 'smplxlh', 'smplxmoyo'):
             gender_str = dict(f='FEMALE', m='MALE', n='NEUTRAL')[gender[0]]
-            smpl_data = np.load(osp.join(model_root, f'SMPLX_{gender_str}.npz'))
+            filename = f'SMPLX_{gender_str}.npz'
         elif model_name == 'smplh':
             gender_str = dict(f='female', m='male')[gender[0]]
             filename = f'SMPLH_{gender_str}.pkl'
-            with open(osp.join(model_root, filename), 'rb') as f:
-                smpl_data = pickle.load(f, encoding='latin1')
         elif model_name == 'smplh16':
             gender_str = dict(f='female', m='male', n='neutral')[gender[0]]
-            smpl_data = np.load(osp.join(model_root, gender_str, 'model.npz'))
+            filename = osp.join(gender_str, 'model.npz')
         elif model_name == 'mano':
-            with open(osp.join(model_root, 'MANO_RIGHT.pkl'), 'rb') as f:
-                smpl_data = pickle.load(f, encoding='latin1')
+            filename = 'MANO_RIGHT.pkl'
         else:
             raise ValueError(f'Unknown model name: {model_name}')
+
+        filepath = osp.join(model_root, filename)
+        try:
+            if filename.endswith('.npz'):
+                smpl_data = np.load(filepath)
+            else:
+                with open(filepath, 'rb') as f:
+                    smpl_data = pickle.load(f, encoding='latin1')
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f'Body model file not found: {filepath}\n\n'
+                f'Set the body model location using one of:\n'
+                f'  1. BodyModel(\'{model_name}\', \'{gender}\', '
+                f'model_root=\'/your/path/body_models/{model_name}\')\n'
+                f'  2. export SMPLFITTER_BODY_MODELS=/your/path/body_models\n'
+                f'  3. export DATA_ROOT=/your/path   '
+                f'(looks for $DATA_ROOT/body_models/)\n\n'
+                f'Download models: python -m smplfitter.download\n'
+                f'Register first at https://smpl.is.tue.mpg.de/'
+            ) from None
 
     res = {}
     res['shapedirs'] = np.array(smpl_data['shapedirs'], dtype=np.float64)
@@ -120,7 +138,14 @@ def initialize(
     # Kid model has an additional shape parameter which pulls the mesh towards the SMIL mean
     # template
     if model_name.lower().startswith('smpl'):
-        v_template_smil = np.load(os.path.join(model_root, 'kid_template.npy')).astype(np.float64)
+        kid_path = os.path.join(model_root, 'kid_template.npy')
+        try:
+            v_template_smil = np.load(kid_path).astype(np.float64)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f'Kid template not found: {kid_path}\n'
+                f'Download it: python -m smplfitter.download'
+            ) from None
         res['kid_shapedir'] = (
             v_template_smil - np.mean(v_template_smil, axis=0) - res['v_template']
         )

@@ -5,6 +5,42 @@ How-To Guides
    :local:
    :depth: 1
 
+Download Body Model Files
+-------------------------
+
+Body model files must be downloaded from the official websites (they cannot be
+redistributed due to licensing). The easiest way is to use the built-in downloader:
+
+.. code-block:: bash
+
+   python -m smplfitter.download
+
+This will prompt for your email and password (register at
+https://smpl.is.tue.mpg.de/ first), then download SMPL, SMPL-X, SMPL+H, and
+MANO model files.
+
+By default, files are saved to the location given by the ``SMPLFITTER_BODY_MODELS``
+environment variable, or ``$DATA_ROOT/body_models``, or
+``~/.local/share/smplfitter/body_models``. You can also pass a path directly:
+
+.. code-block:: bash
+
+   python -m smplfitter.download /path/to/body_models
+
+To tell SMPLFitter where to find the models at runtime:
+
+.. code-block:: bash
+
+   # Option 1: package-specific variable (recommended)
+   export SMPLFITTER_BODY_MODELS=/path/to/body_models
+
+   # Option 2: generic data root
+   export DATA_ROOT=/path/to/data   # looks for $DATA_ROOT/body_models/
+
+   # Option 3: pass directly in code
+   body_model = BodyModel('smpl', 'neutral', model_root='/path/to/body_models/smpl')
+
+
 Fit Pose and Shape to Vertices
 ------------------------------
 
