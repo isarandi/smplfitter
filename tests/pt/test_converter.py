@@ -1,7 +1,6 @@
-from smplfitter.pt import BodyModel, BodyConverter
-import os
-import torch
 import numpy as np
+import torch
+from smplfitter.pt import BodyConverter, BodyModel
 
 
 def test_converter():
@@ -19,20 +18,21 @@ def test_converter():
         res = body_model_in(
             pose_rotvecs=torch.from_numpy(pose_rotvecs).cuda(),
             shape_betas=torch.from_numpy(shape_betas).cuda(),
-            trans=torch.from_numpy(trans).cuda())
+            trans=torch.from_numpy(trans).cuda(),
+        )
 
         conv = converter.convert(
             pose_rotvecs=torch.from_numpy(pose_rotvecs).cuda(),
             shape_betas=torch.from_numpy(shape_betas).cuda(),
-            trans=torch.from_numpy(trans).cuda())
+            trans=torch.from_numpy(trans).cuda(),
+        )
 
         res_new = body_model_out(
-            pose_rotvecs=conv['pose_rotvecs'],
-            shape_betas=conv['shape_betas'],
-            trans=conv['trans'])
+            pose_rotvecs=conv['pose_rotvecs'], shape_betas=conv['shape_betas'], trans=conv['trans']
+        )
 
         new_verts_backconverted = reverse_converter.convert_vertices(res_new['vertices'])
 
-    verts_err = torch.linalg.norm(res['vertices'] - new_verts_backconverted, axis=-1)
+    verts_err = torch.linalg.norm(res['vertices'] - new_verts_backconverted, dim=-1)
     mean_verts_err = torch.mean(verts_err)
     assert mean_verts_err < 1e-2

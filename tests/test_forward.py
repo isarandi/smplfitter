@@ -1,11 +1,8 @@
-import os
-os.environ['DATA_ROOT'] = '/work_uncached/sarandi/data'
 import torch
-import numpy as np
 import smplfitter.pt
 import smplfitter.tf
 import smplfitter.np
-import tensorflow as tf
+
 
 def test_smpl():
     import numpy as np
@@ -116,7 +113,6 @@ def test_smpl():
         ],
         dtype=np.float32,
     )
-
 
     # pt
     model = smplfitter.pt.BodyModel('smpl', 'neutral')

@@ -1,8 +1,7 @@
-import os
-
 import numpy as np
 from scipy.spatial.transform.rotation import Rotation
 from smplfitter.np import BodyModel
+
 
 def test_body_model_initialization():
     for g in ['m', 'f', 'n']:

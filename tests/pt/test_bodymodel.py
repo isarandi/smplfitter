@@ -1,13 +1,6 @@
-import os
-
-os.environ['DATA_ROOT'] = '/work_uncached/sarandi/data'
-import torch
 import numpy as np
+import torch
 from smplfitter.pt import BodyModel
-from scipy.spatial.transform.rotation import Rotation
-import smplx
-
-
 
 
 def test_body_model_initialization():
