@@ -122,6 +122,8 @@ This algorithm was developed for and described in the following paper:
    :maxdepth: 3
    :caption: Contents
 
+   howto
+   smpl_to_smplx
    modules
 
 Indices and tables

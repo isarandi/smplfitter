@@ -13,22 +13,22 @@ import toml
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 
-pyproject_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pyproject.toml"))
+pyproject_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pyproject.toml'))
 
 with open(pyproject_path) as f:
     data = toml.load(f)
 
-project_info = data["project"]
-project_slug = project_info["name"].replace(" ", "-").lower()
-tool_urls = project_info.get("urls", {})
+project_info = data['project']
+project_slug = project_info['name'].replace(' ', '-').lower()
+tool_urls = project_info.get('urls', {})
 
-repo_url = tool_urls.get("Repository", "")
-author_url = tool_urls.get("Author", "")
-github_username = re.match(r"https://github\.com/([^/]+)/?", repo_url)[1]
+repo_url = tool_urls.get('Repository', '')
+author_url = tool_urls.get('Author', '')
+github_username = re.match(r'https://github\.com/([^/]+)/?', repo_url)[1]
 
-project = project_info["name"]
+project = project_info['name']
 release = setuptools_scm.get_version('..')
-version = ".".join(release.split(".")[:2])
+version = '.'.join(release.split('.')[:2])
 main_module_name = project_slug.replace('-', '_')
 repo_name = project_slug
 module = importlib.import_module(main_module_name)
@@ -38,8 +38,8 @@ globals()[main_module_name] = module
 # -- Project information -----------------------------------------------------
 linkcode_url = repo_url
 
-author = project_info["authors"][0]["name"]
-copyright = f'%Y'
+author = project_info['authors'][0]['name']
+copyright = '%Y'
 
 # -- General configuration ---------------------------------------------------
 add_module_names = False
@@ -57,7 +57,7 @@ extensions = [
     'sphinx_codeautolink',
 ]
 bibtex_bibfiles = ['abbrev_long.bib', 'references.bib']
-bibtex_footbibliography_header = ".. rubric:: References"
+bibtex_footbibliography_header = '.. rubric:: References'
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'torch': ('https://pytorch.org/docs/main/', None),
@@ -77,13 +77,13 @@ python_display_short_literal_types = True
 html_title = project
 html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
-    "show_toc_level": 3,
-    "icon_links": [
+    'show_toc_level': 3,
+    'icon_links': [
         {
-            "name": "GitHub",
-            "url": repo_url,
-            "icon": "fa-brands fa-square-github",
-            "type": "fontawesome",
+            'name': 'GitHub',
+            'url': repo_url,
+            'icon': 'fa-brands fa-square-github',
+            'type': 'fontawesome',
         }
     ],
 }
@@ -91,11 +91,11 @@ html_static_path = ['_static']
 html_css_files = ['styles/my_theme.css']
 
 html_context = {
-    "author_url": author_url,
-    "author": author,
+    'author_url': author_url,
+    'author': author,
 }
 
-toc_object_entries_show_parents = "hide"
+toc_object_entries_show_parents = 'hide'
 
 autoapi_root = 'api'
 autoapi_member_order = 'bysource'
@@ -174,10 +174,10 @@ def get_enum_member_line_numbers(obj):
         source_lines, start_line = inspect.getsourcelines(class_)
 
         for i, line in enumerate(source_lines):
-            if f"{obj.name} =" in line:
+            if f'{obj.name} =' in line:
                 return inspect.getsourcefile(class_), start_line + i, start_line + i
         else:
-            raise ValueError(f"Enum member {obj.name} not found in {class_}")
+            raise ValueError(f'Enum member {obj.name} not found in {class_}')
 
 
 def get_member_line_numbers(obj: types.MemberDescriptorType):
@@ -186,10 +186,10 @@ def get_member_line_numbers(obj: types.MemberDescriptorType):
         source_lines, start_line = inspect.getsourcelines(class_)
 
         for i, line in enumerate(source_lines):
-            if f"{obj.__name__} = " in line:
+            if f'{obj.__name__} = ' in line:
                 return inspect.getsourcefile(class_), start_line + i, start_line + i
         else:
-            raise ValueError(f"Member {obj.__name__} not found in {class_}")
+            raise ValueError(f'Member {obj.__name__} not found in {class_}')
 
 
 @contextlib.contextmanager
