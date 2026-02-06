@@ -1,33 +1,18 @@
 [build-system]
-requires = [
-    "setuptools>=64",
-    "wheel",
-    "numpy",
-    "setuptools_scm[toml]>=8"
-]
+requires = ["setuptools>=64", "wheel", "numpy", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "smplfitter"
 dynamic = ["version"]
-description = "Fast inverse kinematics and shape fitting for SMPL-family models in NumPy, PyTorch, and TensorFlow"
+description = "Fast inverse kinematics and shape fitting for SMPL-family models in NumPy, PyTorch, TensorFlow, JAX, and Numba"
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.8"
 license = { file = "LICENSE" }
 
 authors = [
     { name = "István Sárándi", email = "istvan.sarandi@uni-tuebingen.de" }
 ]
-
-dependencies = [
-    "numpy",
-    "scipy",
-    "chumpy"
-]
-
-[project.optional-dependencies]
-tensorflow = ["tensorflow"]
-pytorch = ["torch"]
 
 keywords = [
     "smpl",
@@ -43,20 +28,67 @@ keywords = [
     "gpu",
     "tensorflow",
     "pytorch",
+    "jax",
+    "numba",
     "numpy",
-    "batch-processing"
+    "batch-processing",
 ]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "chumpy",
+]
+
+[project.optional-dependencies]
+tensorflow = ["tensorflow"]
+pytorch = ["torch"]
+jax = ["jax", "jaxlib"]
+numba = ["numba"]
+test = ["pytest>=7.0", "pytest-cov"]
+lint = ["ruff", "pre-commit"]
+docs = [
+    "sphinx",
+    "sphinxcontrib-bibtex",
+    "sphinx-autoapi",
+    "sphinx-autobuild",
+    "sphinx-autodoc-typehints",
+    "sphinx-codeautolink",
+    "pydata-sphinx-theme",
+    "setuptools-scm",
+    "toml",
+]
+dev = ["smplfitter[test,lint,docs,pytorch]"]
 
 [project.urls]
 Homepage = "https://github.com/isarandi/smplfitter"
 Repository = "https://github.com/isarandi/smplfitter"
+Documentation = "https://smplfitter.readthedocs.io/"
 Issues = "https://github.com/isarandi/smplfitter/issues"
+Changelog = "https://github.com/isarandi/smplfitter/releases"
 Author = "https://istvansarandi.com"
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
-write_to = "src/smplfitter/_version.py"
+version_file = "src/smplfitter/_version.py"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -64,6 +96,15 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.black]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
 line-length = 99
-skip-string-normalization = true
+target-version = "py38"
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
