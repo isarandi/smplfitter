@@ -249,10 +249,10 @@ class BodyModel:
     def rototranslate(
         self,
         R: tf.Tensor,
-        t: tf.Tensor,
-        pose_rotvecs: tf.Tensor,
-        shape_betas: tf.Tensor,
-        trans: tf.Tensor,
+        t=None,
+        pose_rotvecs=None,
+        shape_betas=None,
+        trans=None,
         kid_factor=0,
         post_translate: bool = True,
     ):
@@ -291,6 +291,10 @@ class BodyModel:
             account the offset between the pelvis joint in the shaped T-pose and the origin of
             the canonical coordinate system.
         """
+        if t is None:
+            t = tf.zeros(3, dtype=R.dtype)
+        if pose_rotvecs is None or shape_betas is None or trans is None:
+            raise ValueError('pose_rotvecs, shape_betas, and trans are required.')
         current_rotmat = rotvec2mat(pose_rotvecs[..., :3])
         new_rotmat = R @ current_rotmat
         new_pose_rotvec = tf.concat([mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)

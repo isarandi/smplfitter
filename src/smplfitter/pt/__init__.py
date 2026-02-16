@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Optional
 
 import functools
-import os
 import torch
 import warnings
 from .bodymodel import BodyModel
@@ -33,9 +32,6 @@ def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):
 
 
 def get_body_model(model_name, gender, model_root=None):
-    if model_root is None:
-        DATA_ROOT = os.getenv('DATA_ROOT', default='.')
-        model_root = f'{DATA_ROOT}/body_models/{model_name}'
     return BodyModel(model_root=model_root, gender=gender, model_name=model_name)
 
 

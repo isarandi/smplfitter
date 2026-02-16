@@ -338,10 +338,10 @@ class BodyModel(nn.Module):
     def rototranslate(
         self,
         R: torch.Tensor,
-        t: torch.Tensor,
-        pose_rotvecs: torch.Tensor,
-        shape_betas: torch.Tensor,
-        trans: torch.Tensor,
+        t: Optional[torch.Tensor] = None,
+        pose_rotvecs: Optional[torch.Tensor] = None,
+        shape_betas: Optional[torch.Tensor] = None,
+        trans: Optional[torch.Tensor] = None,
         kid_factor: Optional[torch.Tensor] = None,
         post_translate: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -387,6 +387,10 @@ class BodyModel(nn.Module):
 
         """
 
+        if t is None:
+            t = torch.zeros(3, device=R.device, dtype=R.dtype)
+        if pose_rotvecs is None or shape_betas is None or trans is None:
+            raise ValueError('pose_rotvecs, shape_betas, and trans are required.')
         current_rotmat = rotvec2mat(pose_rotvecs[:3])
         new_rotmat = R @ current_rotmat
         new_pose_rotvec = torch.cat([mat2rotvec(new_rotmat), pose_rotvecs[3:]], dim=0)

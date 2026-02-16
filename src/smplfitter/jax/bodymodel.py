@@ -156,12 +156,23 @@ class BodyModel:
         )
 
     def rototranslate(
-        self, R, t, pose_rotvecs, shape_betas, trans, kid_factor=0, post_translate=True
+        self,
+        R,
+        t=None,
+        pose_rotvecs=None,
+        shape_betas=None,
+        trans=None,
+        kid_factor=0,
+        post_translate=True,
     ):
         """Rotate and translate the body in parametric form.
 
         See np.BodyModel.rototranslate for full documentation.
         """
+        if t is None:
+            t = jnp.zeros(3, dtype=R.dtype)
+        if pose_rotvecs is None or shape_betas is None or trans is None:
+            raise ValueError('pose_rotvecs, shape_betas, and trans are required.')
         current_rotmat = rotvec2mat(pose_rotvecs[:3])
         new_rotmat = R @ current_rotmat
         new_pose_rotvec = jnp.concatenate([mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)

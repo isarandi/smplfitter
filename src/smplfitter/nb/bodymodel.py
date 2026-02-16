@@ -223,7 +223,14 @@ class BodyModel:
         return {k: np.squeeze(v, axis=0) for k, v in result.items()}
 
     def rototranslate(
-        self, R, t, pose_rotvecs, shape_betas, trans, kid_factor=0, post_translate=True
+        self,
+        R,
+        t=None,
+        pose_rotvecs=None,
+        shape_betas=None,
+        trans=None,
+        kid_factor=0,
+        post_translate=True,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Rotates and translates the body in parametric form.
@@ -239,7 +246,7 @@ class BodyModel:
 
         Parameters:
             R: Rotation matrix, shaped as (3, 3).
-            t: Translation vector, shaped as (3,).
+            t: Translation vector, shaped as (3,). Defaults to zero (pure rotation).
             pose_rotvecs: Initial rotation vectors per joint, shaped as (num_joints * 3,).
             shape_betas: Shape coefficients (betas) for body shape, shaped as (num_betas,).
             trans: Initial translation vector, shaped as (3,).
@@ -261,6 +268,10 @@ class BodyModel:
             account the offset between the pelvis joint in the shaped T-pose and the origin of
             the canonical coordinate system.
         """
+        if t is None:
+            t = np.zeros(3, dtype=R.dtype)
+        if pose_rotvecs is None or shape_betas is None or trans is None:
+            raise ValueError('pose_rotvecs, shape_betas, and trans are required.')
         current_rotmat = rotvec2mat(pose_rotvecs[:3])
         new_rotmat = R @ current_rotmat
         new_pose_rotvec = np.concatenate([mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)
