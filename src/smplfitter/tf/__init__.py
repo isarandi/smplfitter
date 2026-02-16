@@ -9,6 +9,7 @@ import tensorflow as tf
 from .bodymodel import BodyModel
 from .bodyfitter import BodyFitter
 from .bodyconverter import BodyConverter
+from smplfitter.common import _set_module_for_docs
 
 __all__ = [
     'BodyModel',
@@ -17,6 +18,7 @@ __all__ = [
     'get_cached_body_model',
     'get_cached_fit_fn',
 ]
+_set_module_for_docs(__name__, globals(), __all__)
 
 
 @functools.lru_cache()

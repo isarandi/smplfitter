@@ -12,6 +12,7 @@ from .bodymodel import BodyModel
 from .bodyfitter import BodyFitter
 from .bodyconverter import BodyConverter
 from .bodyflipper import BodyFlipper
+from smplfitter.common import _set_module_for_docs
 
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     'get_cached_fit_fn',
     'fit',
 ]
+_set_module_for_docs(__name__, globals(), __all__)
 
 
 @functools.lru_cache()

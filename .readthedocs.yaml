@@ -5,6 +5,7 @@ build:
   tools:
     python: "3.10"
   commands:
+    - python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
     - python -m pip install ".[docs]"
     - python -m sphinx -E -b html docs $READTHEDOCS_OUTPUT/html
 

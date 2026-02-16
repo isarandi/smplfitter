@@ -5,11 +5,13 @@ from __future__ import annotations
 from .bodymodel import BodyModel
 from .bodyfitter import BodyFitter
 from .bodyconverter import BodyConverter
+from smplfitter.common import _set_module_for_docs
 
 import functools
 import os
 
 __all__ = ['BodyModel', 'BodyFitter', 'BodyConverter', 'get_cached_body_model']
+_set_module_for_docs(__name__, globals(), __all__)
 
 
 @functools.lru_cache()

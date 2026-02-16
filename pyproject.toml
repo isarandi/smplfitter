@@ -74,6 +74,11 @@ docs = [
     "pydata-sphinx-theme",
     "setuptools-scm",
     "toml",
+    "torch",
+    "tensorflow",
+    "jax",
+    "jaxlib",
+    "numba",
 ]
 dev = ["smplfitter[test,lint,docs,pytorch]"]
 

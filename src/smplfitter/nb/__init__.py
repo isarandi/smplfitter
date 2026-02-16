@@ -9,8 +9,10 @@ from .bodymodel import BodyModel
 from .bodyfitter import BodyFitter
 from .bodyconverter import BodyConverter
 from . import rotation
+from smplfitter.common import _set_module_for_docs
 
 __all__ = ['BodyModel', 'BodyFitter', 'BodyConverter', 'get_cached_body_model', 'rotation']
+_set_module_for_docs(__name__, globals(), __all__)
 
 
 @functools.lru_cache()

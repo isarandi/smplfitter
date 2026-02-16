@@ -139,17 +139,25 @@ python_display_short_literal_types = True
 
 
 def autodoc_skip_member(app, what, name, obj, skip, options):
-    """Skip members (functions, classes, modules) without docstrings."""
+    """Skip members without docstrings or from undocumented modules."""
     if not getattr(obj, 'docstring', None):
         return True
     elif what in ('class', 'function', 'attribute'):
-        # Check if the module of the class has a docstring
         module_name = '.'.join(name.split('.')[:-1])
         try:
-            module = importlib.import_module(module_name)
-            return not getattr(module, '__doc__', None)
+            mod = importlib.import_module(module_name)
+            if not getattr(mod, '__doc__', None):
+                return True  # Module has no docstring, skip its members
         except ModuleNotFoundError:
+            # Import failed (e.g. attribute path like Class.attr, or missing dep).
+            # Defer to AutoAPI default.
             return None
+        # For private names, defer to AutoAPI default (which skips them).
+        # For public names, force-include (overrides the imported-members default).
+        short_name = name.split('.')[-1]
+        if short_name.startswith('_') and not short_name.startswith('__'):
+            return None
+        return False
     return skip
 
 
@@ -157,13 +165,24 @@ def linkcode_resolve(domain, info):
     if domain != 'py':
         return None
 
+    fullname = info['fullname']
     try:
-        obj = eval(info['fullname'], module.__dict__)
-        file, start, end = get_line_numbers(obj)
-        relpath = os.path.relpath(file, os.path.dirname(module.__file__))
-        return f'{repo_url}/blob/v{release}/src/{main_module_name}/{relpath}#L{start}-L{end}'
-    except Exception:
+        file, start, end = get_line_numbers(eval(fullname))
+    except AttributeError:
+        # Instance attribute (dataclass field or self.x = ... in __init__)
+        parts = fullname.rsplit('.', 1)
+        if len(parts) != 2:
+            return None
+        try:
+            file, start, end = get_attr_line_numbers(eval(parts[0]), parts[1])
+        except Exception:
+            return None
+    except Exception as e:
+        print(f'linkcode_resolve failed: {info} — {e}')
         return None
+
+    relpath = os.path.relpath(file, os.path.dirname(module.__file__))
+    return f'{repo_url}/blob/v{release}/src/{main_module_name}/{relpath}#L{start}-L{end}'
 
 
 def get_line_numbers(obj):
@@ -194,6 +213,22 @@ def get_enum_member_line_numbers(obj):
                 return inspect.getsourcefile(class_), start_line + i, start_line + i
         else:
             raise ValueError(f'Enum member {obj.name} not found in {class_}')
+
+
+def get_attr_line_numbers(class_, attr_name):
+    with module_restored(class_):
+        source_lines, start_line = inspect.getsourcelines(class_)
+        for i, line in enumerate(source_lines):
+            stripped = line.strip()
+            if (
+                stripped.startswith(f'{attr_name}:')
+                or stripped.startswith(f'{attr_name} :')
+                or f'self.{attr_name} =' in stripped
+                or f'self.{attr_name}=' in stripped
+            ):
+                return inspect.getsourcefile(class_), start_line + i, start_line + i
+        else:
+            raise ValueError(f'Attribute {attr_name} not found in {class_}')
 
 
 def get_member_line_numbers(obj: types.MemberDescriptorType):

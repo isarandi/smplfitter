@@ -11,6 +11,22 @@ from dataclasses import dataclass
 import numpy as np
 
 
+def _set_module_for_docs(module_name, module_globals, all_names):
+    """Override __module__ on exported objects so Sphinx resolves package-level names.
+
+    sphinx-codeautolink uses __module__ to find the docs page for a name. Without this,
+    e.g. ``BodyModel`` imported from ``smplfitter.pt.bodymodel`` would not link to
+    ``smplfitter.pt.BodyModel``. The original __module__ is saved as ``_module_original_``
+    so that ``inspect.getsourcefile`` can still find the real source file (see
+    ``module_restored`` in docs/conf.py).
+    """
+    for name in all_names:
+        obj = module_globals.get(name)
+        if obj is not None and callable(obj):
+            obj._module_original_ = obj.__module__
+            obj.__module__ = module_name
+
+
 @dataclass
 class ModelData:
     """Data loaded from a SMPL-family body model file.
