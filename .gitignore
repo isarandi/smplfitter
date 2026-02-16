@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 
 docs/_build/
+_version.py
