@@ -354,7 +354,6 @@ def load_pickle(path):
 
 def load_vertex_converter_csr(vertex_converter_path):
     """Load a vertex converter sparse matrix from a pickle file."""
-    import scipy.sparse
     with scipy_sparse_forward_compat():
         scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
     return scipy_csr[:, : scipy_csr.shape[1] // 2]

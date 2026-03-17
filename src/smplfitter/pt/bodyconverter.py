@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 from typing import Optional, TYPE_CHECKING
 
-import numpy as np
 import torch
 import torch.nn as nn
 from . import bodyfitter as _bodyfitter

@@ -45,9 +45,15 @@ def rotvec2mat(rotvec):
     out = np.empty((3, 3), dtype=np.float32)
     angle_sq = rx * rx + ry * ry + rz * rz
     if angle_sq < 1e-16:
-        out[0, 0] = 1; out[0, 1] = 0; out[0, 2] = 0
-        out[1, 0] = 0; out[1, 1] = 1; out[1, 2] = 0
-        out[2, 0] = 0; out[2, 1] = 0; out[2, 2] = 1
+        out[0, 0] = 1
+        out[0, 1] = 0
+        out[0, 2] = 0
+        out[1, 0] = 0
+        out[1, 1] = 1
+        out[1, 2] = 0
+        out[2, 0] = 0
+        out[2, 1] = 0
+        out[2, 2] = 1
     else:
         angle = math.sqrt(angle_sq)
         inv_a = np.float32(1.0) / np.float32(angle)
@@ -82,9 +88,15 @@ def rotvec2mat_batch(rotvecs):
             rz = rotvecs[b, n, 2]
             angle_sq = rx * rx + ry * ry + rz * rz
             if angle_sq < 1e-16:
-                out[b, n, 0, 0] = 1; out[b, n, 0, 1] = 0; out[b, n, 0, 2] = 0
-                out[b, n, 1, 0] = 0; out[b, n, 1, 1] = 1; out[b, n, 1, 2] = 0
-                out[b, n, 2, 0] = 0; out[b, n, 2, 1] = 0; out[b, n, 2, 2] = 1
+                out[b, n, 0, 0] = 1
+                out[b, n, 0, 1] = 0
+                out[b, n, 0, 2] = 0
+                out[b, n, 1, 0] = 0
+                out[b, n, 1, 1] = 1
+                out[b, n, 1, 2] = 0
+                out[b, n, 2, 0] = 0
+                out[b, n, 2, 1] = 0
+                out[b, n, 2, 2] = 1
             else:
                 angle = math.sqrt(angle_sq)
                 inv_a = np.float32(1.0) / np.float32(angle)
