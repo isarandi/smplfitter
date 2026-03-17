@@ -6,7 +6,7 @@ import numpy as np
 import numba
 from numba import prange
 from .. import common as smplfitter_common
-from .rotation import mat2rotvec, rotvec2mat
+from .rotation import mat2rotvec, rotvec2mat, rotvec2mat_batch
 from .util import matmul_transp_a
 
 
@@ -71,6 +71,7 @@ class BodyModel:
         self.num_vertices = data.num_vertices
         self.vertex_subset = data.vertex_subset
         self.num_betas = self.shapedirs.shape[2]
+        self.joint_names = data.joint_names
 
     def __call__(
         self,
@@ -114,78 +115,94 @@ class BodyModel:
 
         """
 
+        rot_inputs = [
+            (name, arg) for name, arg in [
+                ('pose_rotvecs', pose_rotvecs),
+                ('rel_rotmats', rel_rotmats),
+                ('glob_rotmats', glob_rotmats),
+            ] if arg is not None
+        ]
+        if len(rot_inputs) > 1:
+            names = [name for name, _ in rot_inputs]
+            raise ValueError(
+                f'Only one rotation input may be provided. Got: {", ".join(names)}.'
+            )
+
         batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
 
+        if batch_size == 0:
+            result = dict(
+                joints=np.empty((0, self.num_joints, 3), np.float32),
+                orientations=np.empty((0, self.num_joints, 3, 3), np.float32),
+            )
+            if return_vertices:
+                result['vertices'] = np.empty((0, self.num_vertices, 3), np.float32)
+            return result
+
+        if pose_rotvecs is not None:
+            pose_rotvecs = np.asarray(pose_rotvecs, np.float32).reshape(
+                batch_size, self.num_joints, 3)
         if rel_rotmats is not None:
             rel_rotmats = np.asarray(rel_rotmats, np.float32)
-        elif pose_rotvecs is not None:
-            pose_rotvecs = np.asarray(pose_rotvecs, np.float32)
-            rel_rotmats = rotvec2mat(np.reshape(pose_rotvecs, (batch_size, self.num_joints, 3)))
-        elif glob_rotmats is None:
-            rel_rotmats = np.tile(np.eye(3, dtype=np.float32), [batch_size, self.num_joints, 1, 1])
-
-        if glob_rotmats is None:
-            glob_rotmats = _forward_kinematics(rel_rotmats, self.kintree_parents)
-
-        parent_indices1 = self.kintree_parents[1:]
-        parent_glob_rotmats1 = glob_rotmats[:, parent_indices1]
-
-        if rel_rotmats is None:
-            rel_rotmats1 = matmul_transp_a(parent_glob_rotmats1, glob_rotmats[:, 1:])
-        else:
-            rel_rotmats1 = rel_rotmats[:, 1:]
-
+        if glob_rotmats is not None:
+            glob_rotmats = np.asarray(glob_rotmats, np.float32)
         if shape_betas is None:
             shape_betas = np.zeros((batch_size, 0), np.float32)
         else:
             shape_betas = np.asarray(shape_betas, np.float32)
-        num_betas = np.minimum(shape_betas.shape[1], self.shapedirs.shape[2])
-
+        if trans is None:
+            trans = np.zeros((1, 3), np.float32)
+        else:
+            trans = np.asarray(trans, np.float32)
         if kid_factor is None:
             kid_factor = np.zeros((1,), np.float32)
         else:
             kid_factor = np.asarray(kid_factor, np.float32)
 
-        j = _compute_joints(
-            self.J_template,
-            self.J_shapedirs[:, :, :num_betas],
-            shape_betas[:, :num_betas],
-            self.kid_J_shapedir,
-            kid_factor,
-        )
-
-        bones1 = j[:, 1:] - j[:, parent_indices1]
-        rotated_bones1 = _batched_matvec(parent_glob_rotmats1, bones1)
-
-        glob_positions = _accumulate_positions(j[:, 0], rotated_bones1, self.kintree_parents)
-
-        if trans is None:
-            trans = np.zeros((1, 3), np.float32)
+        num_betas = min(shape_betas.shape[1], self.num_betas)
+        if num_betas == self.num_betas:
+            shapedirs = self.shapedirs
+            J_shapedirs = self.J_shapedirs
+            shape_betas_slice = shape_betas
         else:
-            trans = trans.astype(np.float32)
+            shapedirs = self.shapedirs[:, :, :num_betas]
+            J_shapedirs = self.J_shapedirs[:, :, :num_betas]
+            shape_betas_slice = shape_betas[:, :num_betas]
 
-        if not return_vertices:
-            return dict(joints=(glob_positions + trans[:, np.newaxis]), orientations=glob_rotmats)
+        has_pose_rotvecs = pose_rotvecs is not None
+        has_rel_rotmats = rel_rotmats is not None
+        has_glob_rotmats = glob_rotmats is not None
 
-        pose_feature = np.reshape(rel_rotmats1, (-1, (self.num_joints - 1) * 3 * 3))
+        # Use dummy arrays for None inputs (the flags tell the @njit function which to use)
+        _dummy3 = np.empty((0, 0, 0), np.float32)
+        _dummy4 = np.empty((0, 0, 0, 0), np.float32)
 
-        v_posed = _compute_v_posed(
-            self.v_template,
-            self.shapedirs[:, :, :num_betas],
-            shape_betas[:, :num_betas],
-            self.posedirs,
-            pose_feature,
-            self.kid_shapedir,
+        vertices, joints, orientations = _body_model_forward(
+            pose_rotvecs if has_pose_rotvecs else _dummy3,
+            rel_rotmats if has_rel_rotmats else _dummy4,
+            glob_rotmats if has_glob_rotmats else _dummy4,
+            shape_betas_slice,
+            trans,
             kid_factor,
+            self.v_template,
+            shapedirs,
+            self.posedirs,
+            self.J_template,
+            J_shapedirs,
+            self.kid_J_shapedir,
+            self.kid_shapedir,
+            self.weights,
+            self.kintree_parents,
+            has_pose_rotvecs,
+            has_rel_rotmats,
+            has_glob_rotmats,
+            return_vertices,
         )
 
-        vertices = _lbs(glob_rotmats, glob_positions, j, self.weights, v_posed)
-
-        return dict(
-            vertices=vertices + trans[:, np.newaxis],
-            joints=glob_positions + trans[:, np.newaxis],
-            orientations=glob_rotmats,
-        )
+        result = dict(joints=joints, orientations=orientations)
+        if return_vertices:
+            result['vertices'] = vertices
+        return result
 
     def single(self, *args, return_vertices=True, **kwargs):
         """
@@ -290,16 +307,23 @@ class BodyModel:
         return new_pose_rotvec, new_trans
 
 
-@numba.njit(error_model='numpy', cache=True)
+@numba.njit(error_model='numpy', cache=True, parallel=True)
 def _forward_kinematics(rel_rotmats, kintree_parents):
     batch_size = rel_rotmats.shape[0]
     num_joints = rel_rotmats.shape[1]
     glob_rotmats = np.empty((batch_size, num_joints, 3, 3), dtype=np.float32)
-    glob_rotmats[:, 0] = rel_rotmats[:, 0]
-    for i_joint in range(1, num_joints):
-        i_parent = kintree_parents[i_joint]
-        for b in range(batch_size):
-            glob_rotmats[b, i_joint] = glob_rotmats[b, i_parent] @ rel_rotmats[b, i_joint]
+    for b in prange(batch_size):
+        for r in range(3):
+            for c in range(3):
+                glob_rotmats[b, 0, r, c] = rel_rotmats[b, 0, r, c]
+        for i_joint in range(1, num_joints):
+            i_parent = kintree_parents[i_joint]
+            for r in range(3):
+                for c in range(3):
+                    val = np.float32(0.0)
+                    for k in range(3):
+                        val += glob_rotmats[b, i_parent, r, k] * rel_rotmats[b, i_joint, k, c]
+                    glob_rotmats[b, i_joint, r, c] = val
     return glob_rotmats
 
 
@@ -315,18 +339,12 @@ def _accumulate_positions(root_pos, rotated_bones1, kintree_parents):
     return glob_positions
 
 
-@numba.njit(error_model='numpy', cache=True)
+@numba.njit(error_model='numpy', cache=True, parallel=True)
 def _compute_joints(J_template, J_shapedirs, shape_betas, kid_J_shapedir, kid_factor):
-    # J_template: (num_joints, 3)
-    # J_shapedirs: (num_joints, 3, num_betas)
-    # shape_betas: (batch_size, num_betas)
-    # kid_J_shapedir: (num_joints, 3)
-    # kid_factor: (batch_size,) or (1,)
-    # Output: (batch_size, num_joints, 3)
     batch_size = shape_betas.shape[0]
     num_joints = J_template.shape[0]
     j = np.empty((batch_size, num_joints, 3), dtype=np.float32)
-    for b in range(batch_size):
+    for b in prange(batch_size):
         for i in range(num_joints):
             for c in range(3):
                 val = J_template[i, c]
@@ -344,14 +362,6 @@ def _compute_joints(J_template, J_shapedirs, shape_betas, kid_J_shapedir, kid_fa
 def _compute_v_posed(
     v_template, shapedirs, shape_betas, posedirs, pose_feature, kid_shapedir, kid_factor
 ):
-    # v_template: (num_vertices, 3)
-    # shapedirs: (num_vertices, 3, num_betas)
-    # shape_betas: (batch_size, num_betas)
-    # posedirs: (num_vertices, 3, num_pose_features)
-    # pose_feature: (batch_size, num_pose_features)
-    # kid_shapedir: (num_vertices, 3)
-    # kid_factor: (batch_size,) or (1,)
-    # Output: (batch_size, num_vertices, 3)
     batch_size = shape_betas.shape[0]
     num_vertices = v_template.shape[0]
     num_betas = shape_betas.shape[1]
@@ -375,15 +385,12 @@ def _compute_v_posed(
     return v_posed
 
 
-@numba.njit(error_model='numpy', cache=True)
+@numba.njit(error_model='numpy', cache=True, parallel=True)
 def _batched_matvec(mats, vecs):
-    # mats: (batch_size, n, 3, 3)
-    # vecs: (batch_size, n, 3)
-    # Output: (batch_size, n, 3)
     batch_size = mats.shape[0]
     n = mats.shape[1]
     result = np.empty((batch_size, n, 3), dtype=np.float32)
-    for b in range(batch_size):
+    for b in prange(batch_size):
         for i in range(n):
             for r in range(3):
                 val = np.float32(0.0)
@@ -435,6 +442,106 @@ def _lbs(glob_rotmats, glob_positions, j, weights, v_posed):
     return vertices
 
 
+@numba.njit(error_model='numpy', cache=True, parallel=True)
+def _body_model_forward(
+    pose_rotvecs, rel_rotmats_in, glob_rotmats_in,
+    shape_betas, trans, kid_factor,
+    v_template, shapedirs, posedirs, J_template, J_shapedirs,
+    kid_J_shapedir, kid_shapedir, weights, kintree_parents,
+    has_pose_rotvecs, has_rel_rotmats, has_glob_rotmats, return_vertices,
+):
+    num_joints = J_template.shape[0]
+    num_vertices = v_template.shape[0]
+
+    if has_pose_rotvecs:
+        batch_size = pose_rotvecs.shape[0]
+    elif has_rel_rotmats:
+        batch_size = rel_rotmats_in.shape[0]
+    elif has_glob_rotmats:
+        batch_size = glob_rotmats_in.shape[0]
+    else:
+        batch_size = shape_betas.shape[0]
+
+    # Step 1: Get rotation matrices
+    if has_glob_rotmats:
+        glob_rotmats = glob_rotmats_in.copy()
+    else:
+        if has_rel_rotmats:
+            rel_rotmats = rel_rotmats_in.copy()
+        elif has_pose_rotvecs:
+            rel_rotmats = rotvec2mat_batch(pose_rotvecs)
+        else:
+            rel_rotmats = np.empty((batch_size, num_joints, 3, 3), dtype=np.float32)
+            for b in range(batch_size):
+                for j in range(num_joints):
+                    rel_rotmats[b, j, 0, 0] = 1.0
+                    rel_rotmats[b, j, 0, 1] = 0.0
+                    rel_rotmats[b, j, 0, 2] = 0.0
+                    rel_rotmats[b, j, 1, 0] = 0.0
+                    rel_rotmats[b, j, 1, 1] = 1.0
+                    rel_rotmats[b, j, 1, 2] = 0.0
+                    rel_rotmats[b, j, 2, 0] = 0.0
+                    rel_rotmats[b, j, 2, 1] = 0.0
+                    rel_rotmats[b, j, 2, 2] = 1.0
+        glob_rotmats = _forward_kinematics(rel_rotmats, kintree_parents)
+
+    # Step 2: Compute joints
+    j = _compute_joints(J_template, J_shapedirs, shape_betas, kid_J_shapedir, kid_factor)
+
+    # Step 3: Compute bones, rotate, accumulate positions
+    bones1 = np.empty((batch_size, num_joints - 1, 3), dtype=np.float32)
+    parent_glob_rotmats1 = np.empty((batch_size, num_joints - 1, 3, 3), dtype=np.float32)
+    for b in range(batch_size):
+        for ji in range(1, num_joints):
+            p = kintree_parents[ji]
+            for c in range(3):
+                bones1[b, ji - 1, c] = j[b, ji, c] - j[b, p, c]
+            for r in range(3):
+                for c in range(3):
+                    parent_glob_rotmats1[b, ji - 1, r, c] = glob_rotmats[b, p, r, c]
+
+    rotated_bones1 = _batched_matvec(parent_glob_rotmats1, bones1)
+    glob_positions = _accumulate_positions(j[:, 0].copy(), rotated_bones1, kintree_parents)
+
+    # Step 4: Add translation to joint positions
+    joints_out = np.empty((batch_size, num_joints, 3), dtype=np.float32)
+    for b in range(batch_size):
+        tb = 0 if trans.shape[0] == 1 else b
+        for ji in range(num_joints):
+            for c in range(3):
+                joints_out[b, ji, c] = glob_positions[b, ji, c] + trans[tb, c]
+
+    if not return_vertices:
+        return np.empty((0, 0, 0), dtype=np.float32), joints_out, glob_rotmats
+
+    # Step 5: Compute rel_rotmats1 for pose feature
+    if has_glob_rotmats and not has_rel_rotmats and not has_pose_rotvecs:
+        rel_rotmats1 = matmul_transp_a(parent_glob_rotmats1, glob_rotmats[:, 1:])
+    else:
+        rel_rotmats1 = rel_rotmats[:, 1:].copy()
+
+    pose_feature = rel_rotmats1.reshape(batch_size, (num_joints - 1) * 9)
+
+    # Step 6: Compute v_posed
+    v_posed = _compute_v_posed(
+        v_template, shapedirs, shape_betas, posedirs, pose_feature,
+        kid_shapedir, kid_factor,
+    )
+
+    # Step 7: LBS
+    vertices = _lbs(glob_rotmats, glob_positions, j, weights, v_posed)
+
+    # Step 8: Add translation to vertices
+    vertices_out = np.empty((batch_size, num_vertices, 3), dtype=np.float32)
+    for b in prange(num_vertices):
+        for bi in range(batch_size):
+            tb = 0 if trans.shape[0] == 1 else bi
+            for c in range(3):
+                vertices_out[bi, b, c] = vertices[bi, b, c] + trans[tb, c]
+
+    return vertices_out, joints_out, glob_rotmats
+
+
 def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats=None):
     batch_sizes = [
         np.asarray(x).shape[0]
@@ -443,10 +550,7 @@ def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats
     ]
 
     if len(batch_sizes) == 0:
-        raise RuntimeError(
-            'At least one argument must be given among pose_rotvecs, shape_betas, trans, '
-            'rel_rotmats.'
-        )
+        return 0
 
     if not all(b == batch_sizes[0] for b in batch_sizes[1:]):
         raise RuntimeError('The batch sizes must be equal.')

@@ -30,7 +30,7 @@ def precompile():
         bm(pose_rotvecs=pose_rotvecs, shape_betas=shape_betas, trans=trans, return_vertices=False)
 
         # Forward pass with rel_rotmats
-        rel_rotmats = rotation.rotvec2mat(pose_rotvecs.reshape(batch_size, num_joints, 3))
+        rel_rotmats = rotation.rotvec2mat_batch(pose_rotvecs.reshape(batch_size, num_joints, 3))
         bm(rel_rotmats=rel_rotmats, shape_betas=shape_betas, trans=trans)
 
         # Forward pass with glob_rotmats
@@ -38,9 +38,11 @@ def precompile():
         bm(glob_rotmats=result['orientations'], shape_betas=shape_betas, trans=trans)
 
     # Rotation functions
-    rotvec = np.random.randn(4, 3).astype(np.float32)
-    rotmat = rotation.rotvec2mat(rotvec)
-    rotation.mat2rotvec(rotmat)
+    rotvec = np.random.randn(3).astype(np.float32)
+    rotation.rotvec2mat(rotvec)
+    rotvecs = np.random.randn(1, 4, 3).astype(np.float32)
+    rotmats = rotation.rotvec2mat_batch(rotvecs)
+    rotation.mat2rotvec(rotmats[0])
 
     # Kabsch
     X = np.random.randn(4, 10, 3).astype(np.float32)

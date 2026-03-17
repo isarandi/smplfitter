@@ -4,8 +4,8 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 import numba
 
-from .lstsq import lstsq, lstsq_partial_share
-from .rotation import mat2rotvec, rotvec2mat
+from .lstsq import lstsq, lstsq_partial_share, _solve_cholesky
+from .rotation import mat2rotvec, rotvec2mat_batch
 
 if TYPE_CHECKING:
     import smplfitter.nb
@@ -71,6 +71,17 @@ class BodyFitter:
         for i, children in enumerate(children_and_self_list):
             self.children_and_self[i, : len(children)] = children
             self.children_and_self_count[i] = len(children)
+
+        # Precompute vertex indices per part (avoids O(joints*verts) scan in Kabsch)
+        part_verts_list = [[] for _ in range(body_model.num_joints)]
+        for v, p in enumerate(self.part_assignment):
+            part_verts_list[p].append(v)
+        max_part_verts = max(len(pv) for pv in part_verts_list)
+        self.part_vertices = np.zeros((body_model.num_joints, max_part_verts), dtype=np.int64)
+        self.part_vertices_count = np.zeros(body_model.num_joints, dtype=np.int64)
+        for i, pv in enumerate(part_verts_list):
+            self.part_vertices[i, : len(pv)] = pv
+            self.part_vertices_count[i] = len(pv)
 
     def fit(
         self,
@@ -138,7 +149,8 @@ class BodyFitter:
             reference_joints_for_rot,
             vertex_weights,
             joint_weights,
-            self.part_assignment,
+            self.part_vertices,
+            self.part_vertices_count,
             self.children_and_self,
             self.children_and_self_count,
             self.body_model.num_joints,
@@ -190,7 +202,8 @@ class BodyFitter:
                 ref_joints_for_rot,
                 vertex_weights,
                 joint_weights,
-                self.part_assignment,
+                self.part_vertices,
+                self.part_vertices_count,
                 self.children_and_self,
                 self.children_and_self_count,
                 self.body_model.num_joints,
@@ -298,7 +311,7 @@ class BodyFitter:
         if 'joints' in result:
             del result['joints']
 
-        return result
+        return {k: v for k, v in result.items() if v is not None}
 
     def fit_with_known_pose(
         self,
@@ -329,7 +342,7 @@ class BodyFitter:
             target_joints = target_joints - target_mean[:, np.newaxis]
 
         # Convert rotation vectors to global rotation matrices
-        rel_rotmats = rotvec2mat(pose_rotvecs.reshape(-1, self.body_model.num_joints, 3))
+        rel_rotmats = rotvec2mat_batch(pose_rotvecs.reshape(-1, self.body_model.num_joints, 3))
         glob_rotmats = _rel_to_glob_rotmats(rel_rotmats, self.body_model.kintree_parents)
 
         result = self._fit_shape(
@@ -409,7 +422,8 @@ class BodyFitter:
                 reference_joints_for_rot,
                 vertex_weights,
                 joint_weights,
-                self.part_assignment,
+                self.part_vertices,
+                self.part_vertices_count,
                 self.children_and_self,
                 self.children_and_self_count,
                 self.body_model.num_joints,
@@ -436,7 +450,8 @@ class BodyFitter:
                     ref_joints_for_rot,
                     vertex_weights,
                     joint_weights,
-                    self.part_assignment,
+                    self.part_vertices,
+                    self.part_vertices_count,
                     self.children_and_self,
                     self.children_and_self_count,
                     self.body_model.num_joints,
@@ -568,61 +583,16 @@ class BodyFitter:
             batch_size,
         )
 
-        # Combine vertices and joints
-        if target_joints is None:
-            target_both = target_vertices
-            pos_both = v_posed_posed_ext[..., 0]
-            jac_pos_both = v_posed_posed_ext[..., 1:]
-        else:
-            target_both = np.concatenate([target_vertices, target_joints], axis=1)
-            pos_both = np.concatenate(
-                [v_posed_posed_ext[..., 0], glob_positions_ext[..., 0]], axis=1
-            )
-            jac_pos_both = np.concatenate(
-                [v_posed_posed_ext[..., 1:], glob_positions_ext[..., 1:]], axis=1
-            )
-
-        # Build design matrix
-        if scale_target:
-            A = np.concatenate([jac_pos_both, -target_both[:, :, :, np.newaxis]], axis=3)
-        elif scale_fit:
-            A = np.concatenate([jac_pos_both, pos_both[:, :, :, np.newaxis]], axis=3)
-        else:
-            A = jac_pos_both
-
-        b = target_both - pos_both
-
         # Weights
         if target_joints is not None and vertex_weights is not None and joint_weights is not None:
             weights = np.concatenate([vertex_weights, joint_weights], axis=1)
         elif target_joints is None and vertex_weights is not None:
             weights = vertex_weights
         else:
-            weights = np.ones(A.shape[:2], dtype=np.float32)
-
-        n_params = (
-            self.n_betas + (1 if self.enable_kid else 0) + (1 if scale_target or scale_fit else 0)
-        )
-
-        # Weighted mean centering
-        weights_sum = np.sum(weights, axis=1, keepdims=True)
-        weights_sum = np.where(weights_sum == 0, 1.0, weights_sum)
-        mean_A = (
-            np.sum(weights[:, :, np.newaxis, np.newaxis] * A, axis=1, keepdims=True)
-            / weights_sum[:, :, np.newaxis, np.newaxis]
-        )
-        mean_b = (
-            np.sum(weights[:, :, np.newaxis] * b, axis=1, keepdims=True)
-            / weights_sum[:, :, np.newaxis]
-        )
-        mean_A = np.nan_to_num(mean_A)
-        mean_b = np.nan_to_num(mean_b)
-        A = A - mean_A
-        b = b - mean_b
-
-        A = A.reshape(batch_size, -1, n_params)
-        b = b.reshape(batch_size, -1, 1)
-        w = np.repeat(weights.reshape(batch_size, -1), 3, axis=1)
+            n_total = target_vertices.shape[1]
+            if target_joints is not None:
+                n_total += target_joints.shape[1]
+            weights = np.ones((batch_size, n_total), dtype=np.float32)
 
         # Regularization
         l2_regularizer_all = np.concatenate(
@@ -656,28 +626,99 @@ class BodyFitter:
                 [l2_regularizer_all, np.array([scale_regularizer], dtype=np.float32)]
             )
             l2_regularizer_reference_all = np.concatenate(
-                [l2_regularizer_reference_all, np.zeros((batch_size, 1), dtype=np.float32)], axis=1
+                [l2_regularizer_reference_all, np.zeros((batch_size, 1), dtype=np.float32)],
+                axis=1,
             )
 
         l2_regularizer_rhs = (l2_regularizer_all * l2_regularizer_reference_all)[:, :, np.newaxis]
 
-        # Solve
-        if share_beta:
-            x = lstsq_partial_share(
-                A,
-                b,
-                w,
-                l2_regularizer_all,
-                l2_regularizer_rhs,
-                n_shared=self.n_betas + (1 if self.enable_kid else 0),
+        if not share_beta and not scale_target and not scale_fit:
+            # Fast path: compute normal equations without materializing full design matrix
+            has_joints = target_joints is not None
+            gramian, ATb, mean_A_out, mean_b_out = _compute_shape_normal_equations(
+                v_posed_posed_ext,
+                glob_positions_ext,
+                target_vertices,
+                target_joints if has_joints else np.empty((batch_size, 0, 3), dtype=np.float32),
+                weights,
+                has_joints,
             )
+            for i in range(len(l2_regularizer_all)):
+                gramian[:, i, i] += l2_regularizer_all[i]
+            ATb += l2_regularizer_rhs
+            x = _batch_solve(gramian, ATb).squeeze(-1)
+            new_trans = mean_b_out - np.matmul(
+                mean_A_out, x[:, :, np.newaxis]
+            ).squeeze(-1)
         else:
-            x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs)
+            # Slow path: materialize full design matrix (for scale/share_beta)
+            n_params = (
+                self.n_betas
+                + (1 if self.enable_kid else 0)
+                + (1 if scale_target or scale_fit else 0)
+            )
 
-        x = x.squeeze(-1)
-        new_trans = mean_b.squeeze(1) - np.matmul(mean_A.squeeze(1), x[:, :, np.newaxis]).squeeze(
-            -1
-        )
+            if target_joints is None:
+                target_both = target_vertices
+                pos_both = v_posed_posed_ext[..., 0]
+                jac_pos_both = v_posed_posed_ext[..., 1:]
+            else:
+                target_both = np.concatenate([target_vertices, target_joints], axis=1)
+                pos_both = np.concatenate(
+                    [v_posed_posed_ext[..., 0], glob_positions_ext[..., 0]], axis=1
+                )
+                jac_pos_both = np.concatenate(
+                    [v_posed_posed_ext[..., 1:], glob_positions_ext[..., 1:]], axis=1
+                )
+
+            if scale_target:
+                A = np.concatenate(
+                    [jac_pos_both, -target_both[:, :, :, np.newaxis]], axis=3
+                )
+            elif scale_fit:
+                A = np.concatenate(
+                    [jac_pos_both, pos_both[:, :, :, np.newaxis]], axis=3
+                )
+            else:
+                A = jac_pos_both
+
+            b = target_both - pos_both
+
+            weights_sum = np.sum(weights, axis=1, keepdims=True)
+            weights_sum = np.where(weights_sum == 0, 1.0, weights_sum)
+            mean_A = (
+                np.sum(weights[:, :, np.newaxis, np.newaxis] * A, axis=1, keepdims=True)
+                / weights_sum[:, :, np.newaxis, np.newaxis]
+            )
+            mean_b = (
+                np.sum(weights[:, :, np.newaxis] * b, axis=1, keepdims=True)
+                / weights_sum[:, :, np.newaxis]
+            )
+            mean_A = np.nan_to_num(mean_A)
+            mean_b = np.nan_to_num(mean_b)
+            A = A - mean_A
+            b = b - mean_b
+
+            A = A.reshape(batch_size, -1, n_params)
+            b = b.reshape(batch_size, -1, 1)
+            w = np.repeat(weights.reshape(batch_size, -1), 3, axis=1)
+
+            if share_beta:
+                x = lstsq_partial_share(
+                    A,
+                    b,
+                    w,
+                    l2_regularizer_all,
+                    l2_regularizer_rhs,
+                    n_shared=self.n_betas + (1 if self.enable_kid else 0),
+                )
+            else:
+                x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs)
+            x = x.squeeze(-1)
+            new_trans = mean_b.squeeze(1) - np.matmul(
+                mean_A.squeeze(1), x[:, :, np.newaxis]
+            ).squeeze(-1)
+
         new_shape = x[:, : self.n_betas]
 
         result = dict(
@@ -763,7 +804,8 @@ class BodyFitter:
             j,
             trans,
             self.body_model.kintree_parents,
-            self.part_assignment,
+            self.part_vertices,
+            self.part_vertices_count,
             self.children_and_self,
             self.children_and_self_count,
             self.body_model.num_joints,
@@ -919,13 +961,13 @@ def _compute_glob_positions_ext(glob_rotmats, J_template_ext, kintree_parents, b
     return glob_positions_ext
 
 
-@numba.njit(error_model='numpy', cache=True)
+@numba.njit(error_model='numpy', cache=True, parallel=True)
 def _batched_matmul_4d(a, b):
     """Batched matrix multiply for (batch, n, 3, 3) arrays."""
     batch_size = a.shape[0]
     n = a.shape[1]
     result = np.empty((batch_size, n, 3, 3), dtype=np.float32)
-    for bi in range(batch_size):
+    for bi in numba.prange(batch_size):
         for ni in range(n):
             for i in range(3):
                 for j in range(3):
@@ -944,7 +986,8 @@ def _fit_global_rotations(
     reference_joints,
     vertex_weights,
     joint_weights,
-    part_assignment,
+    part_vertices,
+    part_vertices_count,
     children_and_self,
     children_and_self_count,
     num_joints,
@@ -975,55 +1018,52 @@ def _fit_global_rotations(
 
         # Get children for this joint
         n_children = children_and_self_count[i]
-        children = children_and_self[i, :n_children]
-
-        # Compute reference joint mean (for centering)
-        ref_joint_mean = np.zeros((ref_batch, 3), dtype=np.float32)
-        for b in range(ref_batch):
-            for ci in range(n_children):
-                child_idx = children[ci]
-                for c in range(3):
-                    ref_joint_mean[b, c] += reference_joints[b, child_idx, c]
-            for c in range(3):
-                ref_joint_mean[b, c] /= n_children
-
-        # Compute target joint mean
-        target_joint_mean = np.zeros((batch_size, 3), dtype=np.float32)
-        for b in range(batch_size):
-            for ci in range(n_children):
-                child_idx = children[ci]
-                for c in range(3):
-                    target_joint_mean[b, c] += target_joints[b, child_idx, c]
-            for c in range(3):
-                target_joint_mean[b, c] /= n_children
+        n_part_verts = part_vertices_count[i]
 
         # Run Kabsch for each batch element
         for b in range(batch_size):
             rb = b if ref_batch > 1 else 0
 
+            # Compute reference joint mean (for centering)
+            ref_center = np.zeros(3, dtype=np.float32)
+            for ci in range(n_children):
+                child_idx = children_and_self[i, ci]
+                for c in range(3):
+                    ref_center[c] += reference_joints[rb, child_idx, c]
+            for c in range(3):
+                ref_center[c] /= n_children
+
+            # Compute target joint mean
+            target_center = np.zeros(3, dtype=np.float32)
+            for ci in range(n_children):
+                child_idx = children_and_self[i, ci]
+                for c in range(3):
+                    target_center[c] += target_joints[b, child_idx, c]
+            for c in range(3):
+                target_center[c] /= n_children
+
             # Compute A = X.T @ Y where X is target, Y is reference (weighted)
             A = np.zeros((3, 3), dtype=np.float32)
 
-            # Add vertex contributions
-            n_verts = part_assignment.shape[0]
-            for v in range(n_verts):
-                if part_assignment[v] == i:
-                    for r in range(3):
-                        x_val = target_vertices[b, v, r] - target_joint_mean[b, r]
-                        for c in range(3):
-                            y_val = (
-                                reference_vertices[rb, v, c] - ref_joint_mean[rb, c]
-                            ) * mesh_weight
-                            A[r, c] += x_val * y_val
+            # Add vertex contributions (using precomputed indices)
+            for vi in range(n_part_verts):
+                v = part_vertices[i, vi]
+                for r in range(3):
+                    x_val = target_vertices[b, v, r] - target_center[r]
+                    for c in range(3):
+                        y_val = (
+                            reference_vertices[rb, v, c] - ref_center[c]
+                        ) * mesh_weight
+                        A[r, c] += x_val * y_val
 
             # Add joint contributions
             for ci in range(n_children):
-                child_idx = children[ci]
+                child_idx = children_and_self[i, ci]
                 for r in range(3):
-                    x_val = target_joints[b, child_idx, r] - target_joint_mean[b, r]
+                    x_val = target_joints[b, child_idx, r] - target_center[r]
                     for c in range(3):
                         y_val = (
-                            reference_joints[rb, child_idx, c] - ref_joint_mean[rb, c]
+                            reference_joints[rb, child_idx, c] - ref_center[c]
                         ) * joint_weight
                         A[r, c] += x_val * y_val
 
@@ -1053,7 +1093,8 @@ def _fit_global_rotations_dependent_core(
     j,  # joint positions from shape
     trans,
     kintree_parents,
-    part_assignment,
+    part_vertices,
+    part_vertices_count,
     children_and_self,
     children_and_self_count,
     num_joints,
@@ -1120,37 +1161,34 @@ def _fit_global_rotations_dependent_core(
                         glob_rots[b, i, r, c] = glob_rots_prev[b, i, r, c]
             continue
 
-        # Get children
+        # Get children and part vertices for this joint
         n_children = children_and_self_count[i]
-        children = children_and_self[i, :n_children]
+        n_part_verts = part_vertices_count[i]
 
         # Compute Kabsch for each batch element
         for b in range(batch_size):
             A = np.zeros((3, 3), dtype=np.float32)
 
-            # Add vertex contributions
-            n_verts = part_assignment.shape[0]
-            for v in range(n_verts):
-                if part_assignment[v] == i:
-                    w = np.float32(1.0)
-                    for r in range(3):
-                        x_val = target_vertices[b, v, r] - glob_positions[b, i, r]
-                        for c in range(3):
-                            y_val = (
-                                reference_vertices[b, v, c] - true_reference_joints[b, i, c]
-                            ) * w
-                            A[r, c] += x_val * y_val
+            # Add vertex contributions (using precomputed indices)
+            for vi in range(n_part_verts):
+                v = part_vertices[i, vi]
+                for r in range(3):
+                    x_val = target_vertices[b, v, r] - glob_positions[b, i, r]
+                    for c in range(3):
+                        y_val = (
+                            reference_vertices[b, v, c] - true_reference_joints[b, i, c]
+                        )
+                        A[r, c] += x_val * y_val
 
             # Add joint contributions
             for ci in range(n_children):
-                child_idx = children[ci]
-                w = np.float32(1.0)
+                child_idx = children_and_self[i, ci]
                 for r in range(3):
                     x_val = target_joints[b, child_idx, r] - glob_positions[b, i, r]
                     for c in range(3):
                         y_val = (
                             reference_joints[b, child_idx, c] - true_reference_joints[b, i, c]
-                        ) * w
+                        )
                         A[r, c] += x_val * y_val
 
             # SVD
@@ -1299,6 +1337,108 @@ def _fit_shape_core(
                     )
 
     return glob_positions_ext, v_posed_posed_ext
+
+
+@numba.njit(error_model='numpy', cache=True, parallel=True)
+def _compute_shape_normal_equations(
+    v_posed_posed_ext,
+    glob_positions_ext,
+    target_vertices,
+    target_joints,
+    weights,
+    has_joints,
+):
+    """Single-pass computation of normal equations for shape fitting.
+
+    Computes the gramian (A^T W A) and right-hand side (A^T W b) of the
+    mean-centered weighted least squares system, without materializing the
+    full design matrix A or residual vector b.
+
+    Uses the identity: Var(X) = E[X^2] - E[X]^2 to compute centered
+    quantities in a single pass over the data.
+    """
+    batch_size = v_posed_posed_ext.shape[0]
+    n_verts = v_posed_posed_ext.shape[1]
+    n_shape = v_posed_posed_ext.shape[3] - 1
+    n_joints = target_joints.shape[1]
+
+    gramian = np.empty((batch_size, n_shape, n_shape), dtype=np.float32)
+    ATb = np.empty((batch_size, n_shape, 1), dtype=np.float32)
+    mean_A = np.empty((batch_size, 3, n_shape), dtype=np.float32)
+    mean_b = np.empty((batch_size, 3), dtype=np.float32)
+
+    for bi in numba.prange(batch_size):
+        W = np.float32(0.0)
+        sum_wA = np.zeros((3, n_shape), dtype=np.float32)
+        sum_wb = np.zeros(3, dtype=np.float32)
+        raw_gramian = np.zeros((n_shape, n_shape), dtype=np.float32)
+        raw_ATb = np.zeros(n_shape, dtype=np.float32)
+
+        for v in range(n_verts):
+            w = weights[bi, v]
+            W += w
+            for c in range(3):
+                b_val = target_vertices[bi, v, c] - v_posed_posed_ext[bi, v, c, 0]
+                sum_wb[c] += w * b_val
+                for s in range(n_shape):
+                    a_val = v_posed_posed_ext[bi, v, c, 1 + s]
+                    wa = w * a_val
+                    sum_wA[c, s] += wa
+                    raw_ATb[s] += wa * b_val
+                    for t in range(s, n_shape):
+                        raw_gramian[s, t] += wa * v_posed_posed_ext[bi, v, c, 1 + t]
+
+        if has_joints:
+            for j in range(n_joints):
+                w = weights[bi, n_verts + j]
+                W += w
+                for c in range(3):
+                    b_val = target_joints[bi, j, c] - glob_positions_ext[bi, j, c, 0]
+                    sum_wb[c] += w * b_val
+                    for s in range(n_shape):
+                        a_val = glob_positions_ext[bi, j, c, 1 + s]
+                        wa = w * a_val
+                        sum_wA[c, s] += wa
+                        raw_ATb[s] += wa * b_val
+                        for t in range(s, n_shape):
+                            raw_gramian[s, t] += wa * glob_positions_ext[bi, j, c, 1 + t]
+
+        inv_W = np.float32(1.0) / W if W > 0 else np.float32(1.0)
+
+        for c in range(3):
+            mean_b[bi, c] = sum_wb[c] * inv_W
+            for s in range(n_shape):
+                mean_A[bi, c, s] = sum_wA[c, s] * inv_W
+
+        # Correct for centering: centered_gramian = raw - sum_wA^T @ sum_wA / W
+        for s in range(n_shape):
+            for t in range(s, n_shape):
+                correction = np.float32(0.0)
+                for c in range(3):
+                    correction += sum_wA[c, s] * sum_wA[c, t]
+                adjusted = raw_gramian[s, t] - correction * inv_W
+                gramian[bi, s, t] = adjusted
+                if t > s:
+                    gramian[bi, t, s] = adjusted
+
+            correction_b = np.float32(0.0)
+            for c in range(3):
+                correction_b += sum_wA[c, s] * sum_wb[c]
+            ATb[bi, s, 0] = raw_ATb[s] - correction_b * inv_W
+
+    return gramian, ATb, mean_A, mean_b
+
+
+@numba.njit(error_model='numpy', cache=True, parallel=True)
+def _batch_solve(gramian, ATb):
+    """Solve gramian @ x = ATb for each batch element using Cholesky."""
+    batch_size = gramian.shape[0]
+    n = gramian.shape[1]
+    m = ATb.shape[2]
+    result = np.empty((batch_size, n, m), dtype=np.float32)
+    for b in numba.prange(batch_size):
+        result[b] = _solve_cholesky(gramian[b], ATb[b])
+    return result
 
 
 @numba.njit(error_model='numpy', cache=True, parallel=True)

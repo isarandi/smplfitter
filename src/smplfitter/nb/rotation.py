@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import numba
+from numba import prange
 
 
 @numba.njit(error_model='numpy', cache=True)
@@ -35,38 +38,72 @@ def kabsch(X, Y):
 
 @numba.njit(error_model='numpy', cache=True)
 def rotvec2mat(rotvec):
-    angle = np.sqrt(np.sum(rotvec * rotvec, axis=-1)).reshape(rotvec.shape[:-1] + (1,))
-    axis = rotvec / angle
-    axis = np.where(angle == 0, np.zeros_like(axis), axis)
+    """Convert a single rotation vector (3,) to rotation matrix (3, 3)."""
+    rx = rotvec[0]
+    ry = rotvec[1]
+    rz = rotvec[2]
+    out = np.empty((3, 3), dtype=np.float32)
+    angle_sq = rx * rx + ry * ry + rz * rz
+    if angle_sq < 1e-16:
+        out[0, 0] = 1; out[0, 1] = 0; out[0, 2] = 0
+        out[1, 0] = 0; out[1, 1] = 1; out[1, 2] = 0
+        out[2, 0] = 0; out[2, 1] = 0; out[2, 2] = 1
+    else:
+        angle = math.sqrt(angle_sq)
+        inv_a = np.float32(1.0) / np.float32(angle)
+        ax = rx * inv_a
+        ay = ry * inv_a
+        az = rz * inv_a
+        s = np.float32(math.sin(angle))
+        c = np.float32(math.cos(angle))
+        c1 = np.float32(1.0) - c
+        out[0, 0] = c + c1 * ax * ax
+        out[0, 1] = c1 * ax * ay - s * az
+        out[0, 2] = c1 * ax * az + s * ay
+        out[1, 0] = c1 * ax * ay + s * az
+        out[1, 1] = c + c1 * ay * ay
+        out[1, 2] = c1 * ay * az - s * ax
+        out[2, 0] = c1 * ax * az - s * ay
+        out[2, 1] = c1 * ay * az + s * ax
+        out[2, 2] = c + c1 * az * az
+    return out
 
-    sin_axis = np.sin(angle) * axis
-    cos_angle = np.cos(angle)
-    cos1_axis = (np.float32(1.0) - cos_angle) * axis
-    axis_y = axis[..., 1]
-    axis_z = axis[..., 2]
-    cos1_axis_x = cos1_axis[..., 0]
-    cos1_axis_y = cos1_axis[..., 1]
-    sin_axis_x = sin_axis[..., 0]
-    sin_axis_y = sin_axis[..., 1]
-    sin_axis_z = sin_axis[..., 2]
 
-    tmp = cos1_axis_x * axis_y
-    m01 = tmp - sin_axis_z
-    m10 = tmp + sin_axis_z
-    tmp = cos1_axis_x * axis_z
-    m02 = tmp + sin_axis_y
-    m20 = tmp - sin_axis_y
-    tmp = cos1_axis_y * axis_z
-    m12 = tmp - sin_axis_x
-    m21 = tmp + sin_axis_x
-
-    diag = cos1_axis * axis + cos_angle
-    m00 = diag[..., 0]
-    m11 = diag[..., 1]
-    m22 = diag[..., 2]
-
-    matrix = np.stack((m00, m01, m02, m10, m11, m12, m20, m21, m22), axis=-1)
-    return matrix.reshape(axis.shape[:-1] + (3, 3)).astype(np.float32)
+@numba.njit(error_model='numpy', cache=True, parallel=True)
+def rotvec2mat_batch(rotvecs):
+    """Convert batch of rotation vectors (B, N, 3) to rotation matrices (B, N, 3, 3)."""
+    B = rotvecs.shape[0]
+    N = rotvecs.shape[1]
+    out = np.empty((B, N, 3, 3), dtype=np.float32)
+    for b in prange(B):
+        for n in range(N):
+            rx = rotvecs[b, n, 0]
+            ry = rotvecs[b, n, 1]
+            rz = rotvecs[b, n, 2]
+            angle_sq = rx * rx + ry * ry + rz * rz
+            if angle_sq < 1e-16:
+                out[b, n, 0, 0] = 1; out[b, n, 0, 1] = 0; out[b, n, 0, 2] = 0
+                out[b, n, 1, 0] = 0; out[b, n, 1, 1] = 1; out[b, n, 1, 2] = 0
+                out[b, n, 2, 0] = 0; out[b, n, 2, 1] = 0; out[b, n, 2, 2] = 1
+            else:
+                angle = math.sqrt(angle_sq)
+                inv_a = np.float32(1.0) / np.float32(angle)
+                ax = rx * inv_a
+                ay = ry * inv_a
+                az = rz * inv_a
+                s = np.float32(math.sin(angle))
+                c = np.float32(math.cos(angle))
+                c1 = np.float32(1.0) - c
+                out[b, n, 0, 0] = c + c1 * ax * ax
+                out[b, n, 0, 1] = c1 * ax * ay - s * az
+                out[b, n, 0, 2] = c1 * ax * az + s * ay
+                out[b, n, 1, 0] = c1 * ax * ay + s * az
+                out[b, n, 1, 1] = c + c1 * ay * ay
+                out[b, n, 1, 2] = c1 * ay * az - s * ax
+                out[b, n, 2, 0] = c1 * ax * az - s * ay
+                out[b, n, 2, 1] = c1 * ay * az + s * ax
+                out[b, n, 2, 2] = c + c1 * az * az
+    return out
 
 
 @numba.njit(error_model='numpy', cache=True)
