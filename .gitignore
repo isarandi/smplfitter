@@ -130,3 +130,13 @@ dmypy.json
 
 docs/_build/
 _version.py
+
+# Experimental backends (not yet public)
+src/smplfitter/cy/
+src/smplfitter/cuda/
+src/smplfitter/cuda2/
+setup_cy.py
+setup_cuda.py
+setup_cuda2.py
+test_cuda2_vs_pt.py
+tests/test_cuda/
