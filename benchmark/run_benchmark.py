@@ -98,23 +98,24 @@ def make_backends(model_name='smpl', return_vertices=True, which=None):
         try:
             import torch
 
-            backends.append(
-                PyTorchBackend(
-                    model_name=model_name,
-                    gpu=False,
-                    compile_mode='compile',
-                    return_vertices=return_vertices,
-                )
-            )
-            if torch.cuda.is_available():
+            for compile_mode in [None, 'script', 'compile']:
                 backends.append(
                     PyTorchBackend(
                         model_name=model_name,
-                        gpu=True,
-                        compile_mode='compile',
+                        gpu=False,
+                        compile_mode=compile_mode,
                         return_vertices=return_vertices,
                     )
                 )
+                if torch.cuda.is_available():
+                    backends.append(
+                        PyTorchBackend(
+                            model_name=model_name,
+                            gpu=True,
+                            compile_mode=compile_mode,
+                            return_vertices=return_vertices,
+                        )
+                    )
         except ImportError:
             pass
 
@@ -304,10 +305,13 @@ class PyTorchBackend(Backend):
             model = model.cuda()
         if compile_mode == 'compile':
             model = torch.compile(model)
+        elif compile_mode == 'script':
+            model = torch.jit.script(model)
         self.model = model
 
         suffix = ' GPU' if gpu else ' CPU'
-        self.name = ('PT compile' if compile_mode == 'compile' else 'PyTorch') + suffix
+        mode_name = {'compile': 'PT compile', 'script': 'PT script', None: 'PT eager'}[compile_mode]
+        self.name = mode_name + suffix
 
     def prepare(self, pose, shape, trans):
         inputs = dict(

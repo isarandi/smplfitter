@@ -23,6 +23,10 @@ def query_throughput(conn, backend, model, mode):
 STYLE = {
     'NumPy': dict(color='C0', linestyle='--', marker='o'),
     'Numba': dict(color='C1', linestyle='--', marker='s'),
+    'PT eager CPU': dict(color='C2', linestyle='--', marker='o'),
+    'PT eager GPU': dict(color='C2', linestyle='-', marker='o'),
+    'PT script CPU': dict(color='C6', linestyle='--', marker='s'),
+    'PT script GPU': dict(color='C6', linestyle='-', marker='s'),
     'PT compile CPU': dict(color='C2', linestyle='--', marker='^'),
     'PT compile GPU': dict(color='C2', linestyle='-', marker='^'),
     'TF function CPU': dict(color='C3', linestyle='--', marker='D'),

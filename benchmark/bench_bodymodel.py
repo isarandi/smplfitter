@@ -4,18 +4,21 @@ import numpy as np
 import time
 
 
-def benchmark(func, inputs, n_warmup=3, n_iter=50):
-    """Run benchmark and return mean time in ms."""
+def benchmark(func, inputs, n_warmup=20, n_iter=50):
+    """Run benchmark and return median time in ms."""
     # Warmup
     for _ in range(n_warmup):
         func(**inputs)
 
-    # Timed runs
-    start = time.perf_counter()
+    # Timed runs (individual)
+    times = []
     for _ in range(n_iter):
+        start = time.perf_counter()
         func(**inputs)
-    elapsed = time.perf_counter() - start
-    return elapsed / n_iter * 1000  # ms
+        elapsed = time.perf_counter() - start
+        times.append(elapsed * 1000)
+    times.sort()
+    return times[n_iter // 2]  # median
 
 
 def main():
