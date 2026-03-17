@@ -647,9 +647,7 @@ class BodyFitter:
                 gramian[:, i, i] += l2_regularizer_all[i]
             ATb += l2_regularizer_rhs
             x = _batch_solve(gramian, ATb).squeeze(-1)
-            new_trans = mean_b_out - np.matmul(
-                mean_A_out, x[:, :, np.newaxis]
-            ).squeeze(-1)
+            new_trans = mean_b_out - np.matmul(mean_A_out, x[:, :, np.newaxis]).squeeze(-1)
         else:
             # Slow path: materialize full design matrix (for scale/share_beta)
             n_params = (
@@ -672,13 +670,9 @@ class BodyFitter:
                 )
 
             if scale_target:
-                A = np.concatenate(
-                    [jac_pos_both, -target_both[:, :, :, np.newaxis]], axis=3
-                )
+                A = np.concatenate([jac_pos_both, -target_both[:, :, :, np.newaxis]], axis=3)
             elif scale_fit:
-                A = np.concatenate(
-                    [jac_pos_both, pos_both[:, :, :, np.newaxis]], axis=3
-                )
+                A = np.concatenate([jac_pos_both, pos_both[:, :, :, np.newaxis]], axis=3)
             else:
                 A = jac_pos_both
 
@@ -1051,9 +1045,7 @@ def _fit_global_rotations(
                 for r in range(3):
                     x_val = target_vertices[b, v, r] - target_center[r]
                     for c in range(3):
-                        y_val = (
-                            reference_vertices[rb, v, c] - ref_center[c]
-                        ) * mesh_weight
+                        y_val = (reference_vertices[rb, v, c] - ref_center[c]) * mesh_weight
                         A[r, c] += x_val * y_val
 
             # Add joint contributions
@@ -1062,9 +1054,7 @@ def _fit_global_rotations(
                 for r in range(3):
                     x_val = target_joints[b, child_idx, r] - target_center[r]
                     for c in range(3):
-                        y_val = (
-                            reference_joints[rb, child_idx, c] - ref_center[c]
-                        ) * joint_weight
+                        y_val = (reference_joints[rb, child_idx, c] - ref_center[c]) * joint_weight
                         A[r, c] += x_val * y_val
 
             # SVD and rotation
@@ -1175,9 +1165,7 @@ def _fit_global_rotations_dependent_core(
                 for r in range(3):
                     x_val = target_vertices[b, v, r] - glob_positions[b, i, r]
                     for c in range(3):
-                        y_val = (
-                            reference_vertices[b, v, c] - true_reference_joints[b, i, c]
-                        )
+                        y_val = reference_vertices[b, v, c] - true_reference_joints[b, i, c]
                         A[r, c] += x_val * y_val
 
             # Add joint contributions
@@ -1186,9 +1174,7 @@ def _fit_global_rotations_dependent_core(
                 for r in range(3):
                     x_val = target_joints[b, child_idx, r] - glob_positions[b, i, r]
                     for c in range(3):
-                        y_val = (
-                            reference_joints[b, child_idx, c] - true_reference_joints[b, i, c]
-                        )
+                        y_val = reference_joints[b, child_idx, c] - true_reference_joints[b, i, c]
                         A[r, c] += x_val * y_val
 
             # SVD

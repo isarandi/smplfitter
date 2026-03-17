@@ -172,8 +172,8 @@ class BodyModel(nn.Module):
             _n_rot += 1
         if _n_rot > 1:
             raise ValueError(
-                "Only one rotation input may be provided "
-                "(pose_rotvecs, rel_rotmats, or glob_rotmats)."
+                'Only one rotation input may be provided '
+                '(pose_rotvecs, rel_rotmats, or glob_rotmats).'
             )
 
         # Extra validation when not running under TorchScript
@@ -190,13 +190,13 @@ class BodyModel(nn.Module):
                     if isinstance(arg, np.ndarray):
                         raise TypeError(
                             f"Expected torch.Tensor for '{name}', got numpy.ndarray. "
-                            f"Convert with torch.from_numpy() or torch.as_tensor()."
+                            f'Convert with torch.from_numpy() or torch.as_tensor().'
                         )
                     if arg.ndim < min_ndim:
                         raise ValueError(
                             f"Expected batched input for '{name}' with at least "
-                            f"{min_ndim} dimensions, but got shape {tuple(arg.shape)}. "
-                            f"For single (unbatched) inputs, use model.single() instead."
+                            f'{min_ndim} dimensions, but got shape {tuple(arg.shape)}. '
+                            f'For single (unbatched) inputs, use model.single() instead.'
                         )
 
         batch_size = 0

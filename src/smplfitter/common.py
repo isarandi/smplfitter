@@ -13,46 +13,118 @@ import numpy as np
 
 # Joint names from the official smplx library (https://github.com/vchoutas/smplx)
 SMPL_JOINT_NAMES = [
-    'pelvis', 'left_hip', 'right_hip', 'spine1', 'left_knee', 'right_knee',
-    'spine2', 'left_ankle', 'right_ankle', 'spine3', 'left_foot', 'right_foot',
-    'neck', 'left_collar', 'right_collar', 'head', 'left_shoulder', 'right_shoulder',
-    'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist', 'left_hand', 'right_hand',
+    'pelvis',
+    'left_hip',
+    'right_hip',
+    'spine1',
+    'left_knee',
+    'right_knee',
+    'spine2',
+    'left_ankle',
+    'right_ankle',
+    'spine3',
+    'left_foot',
+    'right_foot',
+    'neck',
+    'left_collar',
+    'right_collar',
+    'head',
+    'left_shoulder',
+    'right_shoulder',
+    'left_elbow',
+    'right_elbow',
+    'left_wrist',
+    'right_wrist',
+    'left_hand',
+    'right_hand',
 ]
 
 SMPLH_JOINT_NAMES = SMPL_JOINT_NAMES[:22] + [
-    'left_index1', 'left_index2', 'left_index3',
-    'left_middle1', 'left_middle2', 'left_middle3',
-    'left_pinky1', 'left_pinky2', 'left_pinky3',
-    'left_ring1', 'left_ring2', 'left_ring3',
-    'left_thumb1', 'left_thumb2', 'left_thumb3',
-    'right_index1', 'right_index2', 'right_index3',
-    'right_middle1', 'right_middle2', 'right_middle3',
-    'right_pinky1', 'right_pinky2', 'right_pinky3',
-    'right_ring1', 'right_ring2', 'right_ring3',
-    'right_thumb1', 'right_thumb2', 'right_thumb3',
+    'left_index1',
+    'left_index2',
+    'left_index3',
+    'left_middle1',
+    'left_middle2',
+    'left_middle3',
+    'left_pinky1',
+    'left_pinky2',
+    'left_pinky3',
+    'left_ring1',
+    'left_ring2',
+    'left_ring3',
+    'left_thumb1',
+    'left_thumb2',
+    'left_thumb3',
+    'right_index1',
+    'right_index2',
+    'right_index3',
+    'right_middle1',
+    'right_middle2',
+    'right_middle3',
+    'right_pinky1',
+    'right_pinky2',
+    'right_pinky3',
+    'right_ring1',
+    'right_ring2',
+    'right_ring3',
+    'right_thumb1',
+    'right_thumb2',
+    'right_thumb3',
 ]
 
 SMPLX_JOINT_NAMES = SMPL_JOINT_NAMES[:22] + [
-    'jaw', 'left_eye_smplhf', 'right_eye_smplhf',
-    'left_index1', 'left_index2', 'left_index3',
-    'left_middle1', 'left_middle2', 'left_middle3',
-    'left_pinky1', 'left_pinky2', 'left_pinky3',
-    'left_ring1', 'left_ring2', 'left_ring3',
-    'left_thumb1', 'left_thumb2', 'left_thumb3',
-    'right_index1', 'right_index2', 'right_index3',
-    'right_middle1', 'right_middle2', 'right_middle3',
-    'right_pinky1', 'right_pinky2', 'right_pinky3',
-    'right_ring1', 'right_ring2', 'right_ring3',
-    'right_thumb1', 'right_thumb2', 'right_thumb3',
+    'jaw',
+    'left_eye_smplhf',
+    'right_eye_smplhf',
+    'left_index1',
+    'left_index2',
+    'left_index3',
+    'left_middle1',
+    'left_middle2',
+    'left_middle3',
+    'left_pinky1',
+    'left_pinky2',
+    'left_pinky3',
+    'left_ring1',
+    'left_ring2',
+    'left_ring3',
+    'left_thumb1',
+    'left_thumb2',
+    'left_thumb3',
+    'right_index1',
+    'right_index2',
+    'right_index3',
+    'right_middle1',
+    'right_middle2',
+    'right_middle3',
+    'right_pinky1',
+    'right_pinky2',
+    'right_pinky3',
+    'right_ring1',
+    'right_ring2',
+    'right_ring3',
+    'right_thumb1',
+    'right_thumb2',
+    'right_thumb3',
 ]
 
 MANO_JOINT_NAMES = [
     'wrist',
-    'index1', 'index2', 'index3',
-    'middle1', 'middle2', 'middle3',
-    'pinky1', 'pinky2', 'pinky3',
-    'ring1', 'ring2', 'ring3',
-    'thumb1', 'thumb2', 'thumb3',
+    'index1',
+    'index2',
+    'index3',
+    'middle1',
+    'middle2',
+    'middle3',
+    'pinky1',
+    'pinky2',
+    'pinky3',
+    'ring1',
+    'ring2',
+    'ring3',
+    'thumb1',
+    'thumb2',
+    'thumb3',
 ]
 
 _JOINT_NAMES_BY_MODEL = {
@@ -141,6 +213,7 @@ class ModelData:
 def _default_body_models_dir():
     """Return the platform-appropriate default body_models directory."""
     import platformdirs
+
     return osp.join(platformdirs.user_data_dir('smplfitter'), 'body_models')
 
 
@@ -184,9 +257,7 @@ def initialize(
         if model_name != 'mano':
             key = gender[0].lower()
             if key not in gmap:
-                available = [
-                    {'f': 'female', 'm': 'male', 'n': 'neutral'}[k] for k in gmap
-                ]
+                available = [{'f': 'female', 'm': 'male', 'n': 'neutral'}[k] for k in gmap]
                 raise ValueError(
                     f"Gender '{gender}' is not available for model '{model_name}'. "
                     f"Available: {', '.join(repr(g) for g in available)}."
@@ -236,9 +307,7 @@ def initialize(
 
     res['weights'] = np.array(smpl_data['weights'])
     res['faces'] = np.array(smpl_data['f'].astype(np.int32))
-    res['kintree_parents'] = np.array(
-        smpl_data['kintree_table'][0], dtype=np.int32
-    ).tolist()
+    res['kintree_parents'] = np.array(smpl_data['kintree_table'][0], dtype=np.int32).tolist()
     res['num_joints'] = len(res['kintree_parents'])
     res['num_vertices'] = len(res['v_template'])
 
@@ -281,16 +350,13 @@ def initialize(
         subset_path = f'{model_root}/vertex_subset_{vertex_subset_size}.npz'
         if not osp.exists(subset_path):
             from .decimation.decimate_body_models import decimate
-            i_verts, dec_faces = decimate(
-                res['v_template'], res['faces'], vertex_subset_size
-            )
+
+            i_verts, dec_faces = decimate(res['v_template'], res['faces'], vertex_subset_size)
             np.savez(subset_path, i_verts=i_verts, faces=dec_faces)
         vertex_subset_dict = np.load(subset_path)
         vertex_subset = vertex_subset_dict['i_verts']
         faces = vertex_subset_dict['faces']
-        regressor_path = (
-            f'{model_root}/vertex_subset_joint_regr_post_lbs_{vertex_subset_size}.npy'
-        )
+        regressor_path = f'{model_root}/vertex_subset_joint_regr_post_lbs_{vertex_subset_size}.npy'
         if osp.exists(regressor_path):
             joint_regressor_post_lbs = np.load(regressor_path)
         else:
@@ -332,6 +398,7 @@ def scipy_sparse_forward_compat():
     (e.g. scipy.sparse.coo.coo_matrix) can still be loaded after SciPy 2.0
     removes those submodules."""
     import scipy.sparse
+
     saved = {}
     for name in ['coo', 'csr', 'csc']:
         mod_path = f'scipy.sparse.{name}'
@@ -395,6 +462,7 @@ def monkey_patched_for_chumpy():
     # `from scipy.sparse.linalg.interface import LinearOperator`
     # which will break in SciPy 2.0.
     import scipy.sparse.linalg
+
     scipy_patched = {}
     for mod_path, target in [('scipy.sparse.linalg.interface', scipy.sparse.linalg)]:
         saved = sys.modules.get(mod_path)

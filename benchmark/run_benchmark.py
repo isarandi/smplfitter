@@ -310,7 +310,9 @@ class PyTorchBackend(Backend):
         self.model = model
 
         suffix = ' GPU' if gpu else ' CPU'
-        mode_name = {'compile': 'PT compile', 'script': 'PT script', None: 'PT eager'}[compile_mode]
+        mode_name = {'compile': 'PT compile', 'script': 'PT script', None: 'PT eager'}[
+            compile_mode
+        ]
         self.name = mode_name + suffix
 
     def prepare(self, pose, shape, trans):

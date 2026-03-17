@@ -116,17 +116,17 @@ class BodyModel:
         """
 
         rot_inputs = [
-            (name, arg) for name, arg in [
+            (name, arg)
+            for name, arg in [
                 ('pose_rotvecs', pose_rotvecs),
                 ('rel_rotmats', rel_rotmats),
                 ('glob_rotmats', glob_rotmats),
-            ] if arg is not None
+            ]
+            if arg is not None
         ]
         if len(rot_inputs) > 1:
             names = [name for name, _ in rot_inputs]
-            raise ValueError(
-                f'Only one rotation input may be provided. Got: {", ".join(names)}.'
-            )
+            raise ValueError(f'Only one rotation input may be provided. Got: {", ".join(names)}.')
 
         batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
 
@@ -141,7 +141,8 @@ class BodyModel:
 
         if pose_rotvecs is not None:
             pose_rotvecs = np.asarray(pose_rotvecs, np.float32).reshape(
-                batch_size, self.num_joints, 3)
+                batch_size, self.num_joints, 3
+            )
         if rel_rotmats is not None:
             rel_rotmats = np.asarray(rel_rotmats, np.float32)
         if glob_rotmats is not None:
@@ -444,11 +445,25 @@ def _lbs(glob_rotmats, glob_positions, j, weights, v_posed):
 
 @numba.njit(error_model='numpy', cache=True, parallel=True)
 def _body_model_forward(
-    pose_rotvecs, rel_rotmats_in, glob_rotmats_in,
-    shape_betas, trans, kid_factor,
-    v_template, shapedirs, posedirs, J_template, J_shapedirs,
-    kid_J_shapedir, kid_shapedir, weights, kintree_parents,
-    has_pose_rotvecs, has_rel_rotmats, has_glob_rotmats, return_vertices,
+    pose_rotvecs,
+    rel_rotmats_in,
+    glob_rotmats_in,
+    shape_betas,
+    trans,
+    kid_factor,
+    v_template,
+    shapedirs,
+    posedirs,
+    J_template,
+    J_shapedirs,
+    kid_J_shapedir,
+    kid_shapedir,
+    weights,
+    kintree_parents,
+    has_pose_rotvecs,
+    has_rel_rotmats,
+    has_glob_rotmats,
+    return_vertices,
 ):
     num_joints = J_template.shape[0]
     num_vertices = v_template.shape[0]
@@ -524,8 +539,13 @@ def _body_model_forward(
 
     # Step 6: Compute v_posed
     v_posed = _compute_v_posed(
-        v_template, shapedirs, shape_betas, posedirs, pose_feature,
-        kid_shapedir, kid_factor,
+        v_template,
+        shapedirs,
+        shape_betas,
+        posedirs,
+        pose_feature,
+        kid_shapedir,
+        kid_factor,
     )
 
     # Step 7: LBS

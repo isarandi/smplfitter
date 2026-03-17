@@ -114,17 +114,17 @@ class BodyModel:
         """
 
         rot_inputs = [
-            (name, arg) for name, arg in [
+            (name, arg)
+            for name, arg in [
                 ('pose_rotvecs', pose_rotvecs),
                 ('rel_rotmats', rel_rotmats),
                 ('glob_rotmats', glob_rotmats),
-            ] if arg is not None
+            ]
+            if arg is not None
         ]
         if len(rot_inputs) > 1:
             names = [name for name, _ in rot_inputs]
-            raise ValueError(
-                f'Only one rotation input may be provided. Got: {", ".join(names)}.'
-            )
+            raise ValueError(f'Only one rotation input may be provided. Got: {", ".join(names)}.')
 
         batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
 

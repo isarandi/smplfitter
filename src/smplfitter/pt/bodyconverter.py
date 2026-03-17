@@ -149,9 +149,6 @@ class BodyConverter(nn.Module):
         return r.reshape(self.body_model_out.num_vertices, -1, 3).permute(1, 0, 2)
 
 
-
-
-
 def scipy2torch_csr(sparse_matrix):
     return torch.sparse_csr_tensor(
         torch.from_numpy(sparse_matrix.indptr),

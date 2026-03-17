@@ -122,5 +122,3 @@ def get_cached_fit_fn(
             return {k: v.view(*verts.shape[:-2], *v.shape[1:]) for k, v in res.items()}
 
         return wrapped
-
-

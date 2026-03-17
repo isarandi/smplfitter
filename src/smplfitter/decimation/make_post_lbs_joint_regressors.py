@@ -96,12 +96,16 @@ def train_post_lbs_regressor(body_model, i_verts, device=None, total_steps=50000
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lambda step: 1.0 if step < int(phase1_steps * 0.9) else 1e-3
     )
-    trainer.train_loop(dataloader, total_steps=phase1_steps, optimizer=optimizer, scheduler=scheduler)
+    trainer.train_loop(
+        dataloader, total_steps=phase1_steps, optimizer=optimizer, scheduler=scheduler
+    )
     model.threshold_for_sparsity(1e-3)
 
     # Phase 2: fine-tuning with fixed sparsity pattern
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: 30)
-    trainer.train_loop(dataloader, total_steps=total_steps, optimizer=optimizer, scheduler=scheduler)
+    trainer.train_loop(
+        dataloader, total_steps=total_steps, optimizer=optimizer, scheduler=scheduler
+    )
     model.threshold_for_sparsity(1e-3)
 
     return model.get_w().cpu().detach().numpy().T
