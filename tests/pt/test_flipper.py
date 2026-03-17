@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import pytest
 import torch
 
 from smplfitter.pt import BodyFlipper, BodyModel
@@ -39,6 +40,7 @@ def test_flipper_smpl():
     assert mean_verts_err < 1e-2
 
 
+@pytest.mark.skipif('DATA_ROOT' not in os.environ, reason='DATA_ROOT not set')
 def test_flipper_smplx_amass():
     """Test flipper with real AMASS poses."""
     import h5py
