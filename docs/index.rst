@@ -12,7 +12,9 @@ Example use cases:
 * You extracted nonparametric vertex and joint estimates from an RGB image, e.g. using `Neural Localizer Fields (NLF) <https://virtualhumans.mpi-inf.mpg.de/nlf>`_, and want to express this estimate in parametric form, for example to feed it to another model that expects body model parameters.
 * You want to convert between body models. For example, you have SMPL parameters from some dataset but need SMPL-X parameters as input to some pretrained model (or vice versa).
 
-We provide the implementation in **PyTorch, TensorFlow and NumPy**.
+We provide the implementation in **PyTorch, TensorFlow, NumPy, JAX, and Numba**.
+Import from the backend submodule you need: ``from smplfitter.pt import ...`` for PyTorch,
+``from smplfitter.np import ...`` for NumPy, etc.
 
 The algorithm is **fast**, optimized for **batch** processing, can run on the **GPU** and is **differentiable**. There are no learnable parameters here, nor sensitivity to initialization. Just solving equation systems.
 
@@ -29,7 +31,19 @@ Installation
 Download Body Model Files
 --------------------------
 
-You need to download the body model data files from the corresponding websites for this code to work. You only need the ones that you plan to use. There should be a ``DATA_ROOT`` environment variable under which a ``body_models`` directory should look like this:
+You need to download the body model data files from the corresponding websites for this code to work. You only need the ones that you plan to use.
+
+Set one of the following environment variables to tell SMPLFitter where to find them:
+
+.. code-block:: bash
+
+   # Option 1: package-specific variable (recommended)
+   export SMPLFITTER_BODY_MODELS=/path/to/body_models
+
+   # Option 2: generic data root
+   export DATA_ROOT=/path/to/data   # looks for $DATA_ROOT/body_models/
+
+The ``body_models`` directory should look like this:
 
 .. code-block:: text
 
@@ -69,15 +83,15 @@ Basic Fitting
    import torch
    from smplfitter.pt import BodyModel, BodyFitter
 
-   body_model = BodyModel('smpl', 'neutral').cuda()
-   fitter = BodyFitter(body_model, num_betas=10).cuda()
+   body_model = BodyModel('smpl', 'neutral', num_betas=10).cuda()
+   fitter = BodyFitter(body_model).cuda()
    fitter = torch.jit.script(fitter)
 
    batch_size = 30
    vertices = torch.rand((batch_size, 6890, 3)).cuda()
    joints = torch.rand((batch_size, 24, 3)).cuda()
 
-   fit_res = fitter.fit(vertices, joints, n_iter=3, beta_regularizer=1)
+   fit_res = fitter.fit(target_vertices=vertices, target_joints=joints, num_iter=3, beta_regularizer=1)
    fit_res['pose_rotvecs'], fit_res['shape_betas'], fit_res['trans']
 
 Body Model Conversion (Transfer)
@@ -86,7 +100,7 @@ Body Model Conversion (Transfer)
 .. code-block:: python
 
    import torch
-   from smplfitter.pt import BodyConverter
+   from smplfitter.pt import BodyModel, BodyConverter
 
    bm_in = BodyModel('smpl', 'neutral')
    bm_out = BodyModel('smplx', 'neutral')
@@ -123,6 +137,7 @@ This algorithm was developed for and described in the following paper:
    :caption: Contents
 
    howto
+   smpl_to_smplx
    API Reference <api/smplfitter/index>
 
 Indices and tables

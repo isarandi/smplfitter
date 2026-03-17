@@ -20,22 +20,33 @@ https://smpl.is.tue.mpg.de/ first), then download SMPL, SMPL-X, SMPL+H, and
 MANO model files.
 
 By default, files are saved to the location given by the ``SMPLFITTER_BODY_MODELS``
-environment variable, or ``$DATA_ROOT/body_models``, or
-``~/.local/share/smplfitter/body_models``. You can also pass a path directly:
+environment variable, or ``$DATA_ROOT/body_models``, or the platform default data
+directory (e.g. ``~/.local/share/smplfitter/body_models`` on Linux).
+You can also pass a path directly:
 
 .. code-block:: bash
 
    python -m smplfitter.download /path/to/body_models
 
-To tell SMPLFitter where to find the models at runtime:
+At runtime, SMPLFitter checks the same locations automatically (in order):
+
+1. ``$SMPLFITTER_BODY_MODELS/``
+2. ``$DATA_ROOT/body_models/``
+3. ``./body_models/``
+4. The platform default data directory (via ``platformdirs``)
+
+If you downloaded to a custom location, set an environment variable or pass the path
+directly:
 
 .. code-block:: bash
 
-   # Option 1: package-specific variable (recommended)
+   # Option 1: package-specific variable
    export SMPLFITTER_BODY_MODELS=/path/to/body_models
 
    # Option 2: generic data root
    export DATA_ROOT=/path/to/data   # looks for $DATA_ROOT/body_models/
+
+.. code-block:: python
 
    # Option 3: pass directly in code
    body_model = BodyModel('smpl', 'neutral', model_root='/path/to/body_models/smpl')
@@ -309,26 +320,55 @@ The converter also supports:
 * ``known_output_shape_betas``: If shape is already known, only fit pose
 
 
-Use the Convenience Functions
------------------------------
+Rotate and Translate Body Parameters
+-------------------------------------
 
-For one-off fitting without manually creating model and fitter objects:
+Rotating a parametric body is nontrivial because the global orientation rotates around
+the pelvis joint, not the coordinate origin. Use
+:meth:`~smplfitter.pt.BodyModel.rototranslate` to apply a rotation and translation
+to body parameters correctly:
 
 .. code-block:: python
 
-   from smplfitter.pt import fit
+   import torch
+   from smplfitter.pt import BodyModel
 
-   result = fit(
-       verts=vertices,
-       joints=joints,
-       body_model_name='smpl',
-       gender='neutral',
-       num_betas=10,
-       num_iter=3,
+   body_model = BodyModel('smpl', 'neutral', num_betas=10).cuda()
+
+   # Apply a rotation R and translation t such that:
+   #   new_mesh = R @ old_mesh + t
+   R = torch.eye(3).cuda()       # (3, 3) rotation matrix
+   t = torch.zeros(3).cuda()     # (3,) translation vector
+
+   new_pose, new_trans = body_model.rototranslate(
+       R=R, t=t,
+       pose_rotvecs=pose,         # (num_joints * 3,)
+       shape_betas=betas,         # (num_betas,)
+       trans=trans,                # (3,)
    )
 
-For repeated fitting (e.g., in a training loop), use a cached and JIT-compiled
-fitter:
+Set ``post_translate=False`` to subtract ``t`` *before* rotation instead of adding it
+after (useful for camera-centric transformations).
+
+
+Cache Body Models
+-----------------
+
+If you create the same :class:`~smplfitter.pt.BodyModel` in multiple places (e.g.,
+in a training loop, across files, or when using both a fitter and a converter),
+use :func:`~smplfitter.pt.get_cached_body_model` to avoid loading the model files
+repeatedly:
+
+.. code-block:: python
+
+   from smplfitter.pt import get_cached_body_model
+
+   # First call loads from disk; subsequent calls return the cached instance
+   body_model = get_cached_body_model('smpl', 'neutral')
+
+The cached instance is shared, so do not modify it in place.
+
+For repeated fitting with a cached and JIT-compiled fitter:
 
 .. code-block:: python
 
