@@ -44,6 +44,7 @@ class BodyModel:
         self.num_joints = data.num_joints
         self.num_vertices = data.num_vertices
         self.num_betas = self.shapedirs.shape[2]
+        self.joint_names = data.joint_names
 
     def __call__(
         self,

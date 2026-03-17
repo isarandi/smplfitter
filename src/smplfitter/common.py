@@ -11,6 +11,61 @@ from dataclasses import dataclass
 import numpy as np
 
 
+# Joint names from the official smplx library (https://github.com/vchoutas/smplx)
+SMPL_JOINT_NAMES = [
+    'pelvis', 'left_hip', 'right_hip', 'spine1', 'left_knee', 'right_knee',
+    'spine2', 'left_ankle', 'right_ankle', 'spine3', 'left_foot', 'right_foot',
+    'neck', 'left_collar', 'right_collar', 'head', 'left_shoulder', 'right_shoulder',
+    'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist', 'left_hand', 'right_hand',
+]
+
+SMPLH_JOINT_NAMES = SMPL_JOINT_NAMES[:22] + [
+    'left_index1', 'left_index2', 'left_index3',
+    'left_middle1', 'left_middle2', 'left_middle3',
+    'left_pinky1', 'left_pinky2', 'left_pinky3',
+    'left_ring1', 'left_ring2', 'left_ring3',
+    'left_thumb1', 'left_thumb2', 'left_thumb3',
+    'right_index1', 'right_index2', 'right_index3',
+    'right_middle1', 'right_middle2', 'right_middle3',
+    'right_pinky1', 'right_pinky2', 'right_pinky3',
+    'right_ring1', 'right_ring2', 'right_ring3',
+    'right_thumb1', 'right_thumb2', 'right_thumb3',
+]
+
+SMPLX_JOINT_NAMES = SMPL_JOINT_NAMES[:22] + [
+    'jaw', 'left_eye_smplhf', 'right_eye_smplhf',
+    'left_index1', 'left_index2', 'left_index3',
+    'left_middle1', 'left_middle2', 'left_middle3',
+    'left_pinky1', 'left_pinky2', 'left_pinky3',
+    'left_ring1', 'left_ring2', 'left_ring3',
+    'left_thumb1', 'left_thumb2', 'left_thumb3',
+    'right_index1', 'right_index2', 'right_index3',
+    'right_middle1', 'right_middle2', 'right_middle3',
+    'right_pinky1', 'right_pinky2', 'right_pinky3',
+    'right_ring1', 'right_ring2', 'right_ring3',
+    'right_thumb1', 'right_thumb2', 'right_thumb3',
+]
+
+MANO_JOINT_NAMES = [
+    'wrist',
+    'index1', 'index2', 'index3',
+    'middle1', 'middle2', 'middle3',
+    'pinky1', 'pinky2', 'pinky3',
+    'ring1', 'ring2', 'ring3',
+    'thumb1', 'thumb2', 'thumb3',
+]
+
+_JOINT_NAMES_BY_MODEL = {
+    'smpl': SMPL_JOINT_NAMES,
+    'smplx': SMPLX_JOINT_NAMES,
+    'smplxlh': SMPLX_JOINT_NAMES,
+    'smplxmoyo': SMPLX_JOINT_NAMES,
+    'smplh': SMPLH_JOINT_NAMES,
+    'smplh16': SMPLH_JOINT_NAMES,
+    'mano': MANO_JOINT_NAMES,
+}
+
+
 def _set_module_for_docs(module_name, module_globals, all_names):
     """Override __module__ on exported objects so Sphinx resolves package-level names.
 
@@ -78,6 +133,9 @@ class ModelData:
 
     vertex_subset: np.ndarray
     """Indices of vertices used (for partial models)."""
+
+    joint_names: list[str]
+    """Names of the joints in the body model."""
 
 
 def _default_body_models_dir():
@@ -253,6 +311,7 @@ def initialize(
         num_joints=res['num_joints'],
         num_vertices=len(vertex_subset),
         vertex_subset=vertex_subset,
+        joint_names=_JOINT_NAMES_BY_MODEL.get(model_name, []),
     )
 
 

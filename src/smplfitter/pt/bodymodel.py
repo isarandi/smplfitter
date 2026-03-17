@@ -105,6 +105,9 @@ class BodyModel(nn.Module):
         self.vertex_subset = data.vertex_subset
         """Subset of vertices to use for the body model. If None, all vertices are used."""
 
+        self.joint_names = data.joint_names
+        """Names of the joints in the body model."""
+
         if self.vertex_subset is None:
             self.vertex_subset = np.arange(self.num_vertices)
 

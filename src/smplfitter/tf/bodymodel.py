@@ -65,6 +65,7 @@ class BodyModel:
         self.num_vertices = data.num_vertices
         self.num_betas = self.shapedirs.shape[2]
         self.vertex_subset = data.vertex_subset
+        self.joint_names = data.joint_names
 
     def __call__(
         self,
