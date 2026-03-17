@@ -289,6 +289,16 @@ def monkey_patched_for_chumpy():
         inspect.getargspec = inspect.getfullargspec
         added_getargspec = True
 
+    # Patch scipy.sparse.linalg.interface for chumpy's
+    # `from scipy.sparse.linalg.interface import LinearOperator`
+    # which will break in SciPy 2.0.
+    import scipy.sparse.linalg
+    scipy_patched = {}
+    for mod_path, target in [('scipy.sparse.linalg.interface', scipy.sparse.linalg)]:
+        saved = sys.modules.get(mod_path)
+        sys.modules[mod_path] = target
+        scipy_patched[mod_path] = saved
+
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', FutureWarning)
         yield
@@ -298,3 +308,9 @@ def monkey_patched_for_chumpy():
 
     if added_getargspec:
         del inspect.getargspec
+
+    for mod_path, old_val in scipy_patched.items():
+        if old_val is None:
+            sys.modules.pop(mod_path, None)
+        else:
+            sys.modules[mod_path] = old_val
