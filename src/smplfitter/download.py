@@ -81,7 +81,8 @@ def _resolve_body_models_dir():
     if data_root:
         return Path(data_root) / 'body_models'
 
-    default = Path.home() / '.local' / 'share' / 'smplfitter' / 'body_models'
+    import platformdirs
+    default = Path(platformdirs.user_data_dir('smplfitter')) / 'body_models'
     print('No SMPLFITTER_BODY_MODELS or DATA_ROOT environment variable set.')
     print(f'Default location: {default}')
     answer = input('Use this location? [Y/n] ').strip().lower()

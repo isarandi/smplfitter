@@ -55,6 +55,7 @@ dependencies = [
     "numpy",
     "scipy",
     "chumpy",
+    "platformdirs",
 ]
 
 [project.optional-dependencies]

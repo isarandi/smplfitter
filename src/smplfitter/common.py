@@ -80,6 +80,12 @@ class ModelData:
     """Indices of vertices used (for partial models)."""
 
 
+def _default_body_models_dir():
+    """Return the platform-appropriate default body_models directory."""
+    import platformdirs
+    return osp.join(platformdirs.user_data_dir('smplfitter'), 'body_models')
+
+
 def initialize(
     model_name,
     gender,
@@ -93,27 +99,52 @@ def initialize(
     if model_root is None:
         body_models_dir = os.getenv('SMPLFITTER_BODY_MODELS')
         if body_models_dir is None:
-            data_root = os.getenv('DATA_ROOT', '.')
-            body_models_dir = f'{data_root}/body_models'
+            data_root = os.getenv('DATA_ROOT')
+            if data_root is not None:
+                body_models_dir = f'{data_root}/body_models'
+            elif osp.isdir('body_models'):
+                body_models_dir = 'body_models'
+            else:
+                body_models_dir = _default_body_models_dir()
         model_root = f'{body_models_dir}/{model_name}'
 
     with monkey_patched_for_chumpy():
+        gender_maps = {
+            'smpl': dict(f='f', m='m', n='neutral'),
+            'smplx': dict(f='FEMALE', m='MALE', n='NEUTRAL'),
+            'smplxlh': dict(f='FEMALE', m='MALE', n='NEUTRAL'),
+            'smplxmoyo': dict(f='FEMALE', m='MALE', n='NEUTRAL'),
+            'smplh': dict(f='female', m='male'),
+            'smplh16': dict(f='female', m='male', n='neutral'),
+            'mano': {},
+        }
+
+        if model_name not in gender_maps:
+            raise ValueError(f'Unknown model name: {model_name}')
+
+        gmap = gender_maps[model_name]
+        if model_name != 'mano':
+            key = gender[0].lower()
+            if key not in gmap:
+                available = [
+                    {'f': 'female', 'm': 'male', 'n': 'neutral'}[k] for k in gmap
+                ]
+                raise ValueError(
+                    f"Gender '{gender}' is not available for model '{model_name}'. "
+                    f"Available: {', '.join(repr(g) for g in available)}."
+                )
+            gender_str = gmap[key]
+
         if model_name == 'smpl':
-            gender_str = dict(f='f', m='m', n='neutral')[gender[0]]
             filename = f'basicmodel_{gender_str}_lbs_10_207_0_v1.1.0.pkl'
         elif model_name in ('smplx', 'smplxlh', 'smplxmoyo'):
-            gender_str = dict(f='FEMALE', m='MALE', n='NEUTRAL')[gender[0]]
             filename = f'SMPLX_{gender_str}.npz'
         elif model_name == 'smplh':
-            gender_str = dict(f='female', m='male')[gender[0]]
             filename = f'SMPLH_{gender_str}.pkl'
         elif model_name == 'smplh16':
-            gender_str = dict(f='female', m='male', n='neutral')[gender[0]]
             filename = osp.join(gender_str, 'model.npz')
         elif model_name == 'mano':
             filename = 'MANO_RIGHT.pkl'
-        else:
-            raise ValueError(f'Unknown model name: {model_name}')
 
         filepath = osp.join(model_root, filename)
         try:
