@@ -147,7 +147,9 @@ def initialize(
 
     res['weights'] = np.array(smpl_data['weights'])
     res['faces'] = np.array(smpl_data['f'].astype(np.int32))
-    res['kintree_parents'] = smpl_data['kintree_table'][0].tolist()
+    res['kintree_parents'] = np.array(
+        smpl_data['kintree_table'][0], dtype=np.int32
+    ).tolist()
     res['num_joints'] = len(res['kintree_parents'])
     res['num_vertices'] = len(res['v_template'])
 

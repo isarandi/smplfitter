@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.spatial.transform.rotation import Rotation
+from scipy.spatial.transform import Rotation
 from smplfitter.np import BodyModel
 
 
