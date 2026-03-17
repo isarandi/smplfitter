@@ -113,7 +113,29 @@ class BodyModel:
 
         """
 
+        rot_inputs = [
+            (name, arg) for name, arg in [
+                ('pose_rotvecs', pose_rotvecs),
+                ('rel_rotmats', rel_rotmats),
+                ('glob_rotmats', glob_rotmats),
+            ] if arg is not None
+        ]
+        if len(rot_inputs) > 1:
+            names = [name for name, _ in rot_inputs]
+            raise ValueError(
+                f'Only one rotation input may be provided. Got: {", ".join(names)}.'
+            )
+
         batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
+
+        if batch_size == 0:
+            result = dict(
+                joints=np.empty((0, self.num_joints, 3), np.float32),
+                orientations=np.empty((0, self.num_joints, 3, 3), np.float32),
+            )
+            if return_vertices:
+                result['vertices'] = np.empty((0, self.num_vertices, 3), np.float32)
+            return result
 
         if rel_rotmats is not None:
             rel_rotmats = np.asarray(rel_rotmats, np.float32)
@@ -308,10 +330,7 @@ def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats
     ]
 
     if len(batch_sizes) == 0:
-        raise RuntimeError(
-            'At least one argument must be given among pose_rotvecs, shape_betas, trans, '
-            'rel_rotmats.'
-        )
+        return 0
 
     if not all(b == batch_sizes[0] for b in batch_sizes[1:]):
         raise RuntimeError('The batch sizes must be equal.')

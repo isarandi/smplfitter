@@ -157,6 +157,44 @@ class BodyModel(nn.Module):
                     (batch_size, num_joints, 3, 3).
         """
 
+        # -- Input validation --
+        # Rotation conflict check (TorchScript-compatible)
+        _n_rot = 0
+        if pose_rotvecs is not None:
+            _n_rot += 1
+        if rel_rotmats is not None:
+            _n_rot += 1
+        if glob_rotmats is not None:
+            _n_rot += 1
+        if _n_rot > 1:
+            raise ValueError(
+                "Only one rotation input may be provided "
+                "(pose_rotvecs, rel_rotmats, or glob_rotmats)."
+            )
+
+        # Extra validation when not running under TorchScript
+        if not torch.jit.is_scripting():
+            for name, arg, min_ndim in [
+                ('pose_rotvecs', pose_rotvecs, 2),
+                ('shape_betas', shape_betas, 2),
+                ('trans', trans, 2),
+                ('kid_factor', kid_factor, 1),
+                ('rel_rotmats', rel_rotmats, 4),
+                ('glob_rotmats', glob_rotmats, 4),
+            ]:
+                if arg is not None:
+                    if isinstance(arg, np.ndarray):
+                        raise TypeError(
+                            f"Expected torch.Tensor for '{name}', got numpy.ndarray. "
+                            f"Convert with torch.from_numpy() or torch.as_tensor()."
+                        )
+                    if arg.ndim < min_ndim:
+                        raise ValueError(
+                            f"Expected batched input for '{name}' with at least "
+                            f"{min_ndim} dimensions, but got shape {tuple(arg.shape)}. "
+                            f"For single (unbatched) inputs, use model.single() instead."
+                        )
+
         batch_size = 0
         for arg in [pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats]:
             if arg is not None:

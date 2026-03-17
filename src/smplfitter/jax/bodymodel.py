@@ -56,6 +56,19 @@ class BodyModel:
         glob_rotmats: Optional[jnp.ndarray] = None,
         return_vertices: bool = True,
     ) -> dict[str, jnp.ndarray]:
+        rot_inputs = [
+            (name, arg) for name, arg in [
+                ('pose_rotvecs', pose_rotvecs),
+                ('rel_rotmats', rel_rotmats),
+                ('glob_rotmats', glob_rotmats),
+            ] if arg is not None
+        ]
+        if len(rot_inputs) > 1:
+            names = [name for name, _ in rot_inputs]
+            raise ValueError(
+                f'Only one rotation input may be provided. Got: {", ".join(names)}.'
+            )
+
         batch_size = 0
         for arg in [pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats]:
             if arg is not None:

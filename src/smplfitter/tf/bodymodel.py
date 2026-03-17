@@ -120,7 +120,30 @@ class BodyModel:
                 lambda x: tf.RaggedTensor.from_row_splits(x, shape_betas.row_splits), res
             )
 
+        rot_inputs = [
+            (name, arg) for name, arg in [
+                ('pose_rotvecs', pose_rotvecs),
+                ('rel_rotmats', rel_rotmats),
+                ('glob_rotmats', glob_rotmats),
+            ] if arg is not None
+        ]
+        if len(rot_inputs) > 1:
+            names = [name for name, _ in rot_inputs]
+            raise ValueError(
+                f'Only one rotation input may be provided. Got: {", ".join(names)}.'
+            )
+
         batch_size = check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats)
+
+        if batch_size == 0:
+            result = dict(
+                joints=tf.zeros((0, self.num_joints, 3)),
+                orientations=tf.zeros((0, self.num_joints, 3, 3)),
+            )
+            if return_vertices:
+                result['vertices'] = tf.zeros((0, self.num_vertices, 3))
+            return result
+
         if rel_rotmats is not None:
             rel_rotmats = tf.cast(rel_rotmats, tf.float32)
         elif pose_rotvecs is not None:
@@ -326,9 +349,6 @@ def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats, glob_rotmats
     ]
 
     if len(batch_sizes) == 0:
-        raise RuntimeError(
-            'At least one argument must be given among pose_rotvecs, shape_betas, trans, '
-            'rel_rotmats.'
-        )
+        return 0
 
     return batch_sizes[0]
