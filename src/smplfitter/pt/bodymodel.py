@@ -38,10 +38,14 @@ class BodyModel(nn.Module):
                 original SMPL+H.
 
         gender: Gender of the model, which can be ``"neutral"``, ``"female"`` or ``"male"``.
-        model_root: Path to the directory containing model files. By default,
-            ``"{DATA_ROOT}/body_models/{model_name}"`` is used, using the ``DATA_ROOT`` environment
-            variable. If a ``DATA_ROOT`` envvar doesn't exist, ``./body_models/{model_name}`` is
-            used.
+        model_root: Path to the directory containing model files. If not given, the
+            following locations are checked in order:
+
+            1. ``$SMPLFITTER_BODY_MODELS/{model_name}``
+            2. ``$DATA_ROOT/body_models/{model_name}``
+            3. ``./body_models/{model_name}``
+            4. The platform default data directory (via ``platformdirs``)
+
         num_betas: Number of shape parameters (betas) to use. By default, all available betas are
             used.
     """

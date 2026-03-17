@@ -18,6 +18,8 @@ _set_module_for_docs(__name__, globals(), __all__)
 def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):
     """Return a cached BodyModel instance, creating it on first call.
 
+    Subsequent calls with the same arguments return the same object,
+    avoiding redundant file I/O and initialization.
 
     Parameters:
         model_name: Body model type (``'smpl'``, ``'smplx'``, ``'smplh'``, etc.).

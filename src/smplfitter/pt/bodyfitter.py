@@ -13,8 +13,7 @@ if TYPE_CHECKING:
 
 
 class BodyFitter(nn.Module):
-    """
-    Fits body model (SMPL/SMPL-X/SMPL+H) parameters to lists of target vertices and joints.
+    """Fits body model (SMPL/SMPL-X/SMPL+H) parameters to lists of target vertices and joints.
 
     Parameters:
         body_model: The body model instance we wish to fit, of a certain SMPL model variant and \

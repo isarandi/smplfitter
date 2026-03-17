@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 
 
 class BodyFlipper(nn.Module):
-    """
-    Horizontally (x axis) flips SMPL-like body model parameters, to mirror the body.
+    """Horizontally (x axis) flips SMPL-like body model parameters, to mirror the body.
 
     Parameters:
         body_model: A body model whose parameters are to be transformed.
