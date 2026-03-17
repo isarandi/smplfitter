@@ -278,12 +278,23 @@ def initialize(
     )
 
     if vertex_subset_size is not None:
-        vertex_subset_dict = np.load(f'{model_root}/vertex_subset_{vertex_subset_size}.npz')
+        subset_path = f'{model_root}/vertex_subset_{vertex_subset_size}.npz'
+        if not osp.exists(subset_path):
+            from .decimation.decimate_body_models import decimate
+            i_verts, dec_faces = decimate(
+                res['v_template'], res['faces'], vertex_subset_size
+            )
+            np.savez(subset_path, i_verts=i_verts, faces=dec_faces)
+        vertex_subset_dict = np.load(subset_path)
         vertex_subset = vertex_subset_dict['i_verts']
         faces = vertex_subset_dict['faces']
-        joint_regressor_post_lbs = np.load(
+        regressor_path = (
             f'{model_root}/vertex_subset_joint_regr_post_lbs_{vertex_subset_size}.npy'
         )
+        if osp.exists(regressor_path):
+            joint_regressor_post_lbs = np.load(regressor_path)
+        else:
+            joint_regressor_post_lbs = res['J_regressor'][:, vertex_subset]
 
     if vertex_subset is None:
         vertex_subset = np.arange(res['num_vertices'], dtype=np.int64)

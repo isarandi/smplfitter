@@ -29,12 +29,7 @@ torch.backends.cudnn.benchmark = True
 
 def main():
     for body_model_name in ['smpl', 'smplx']:
-        canonical_verts = torch.from_numpy(
-            np.load(f'{DATA_ROOT}/nlf/canonical_vertices_{body_model_name}.npy')
-        ).float()
-        body_model = smplfitter_pt.BodyModel(body_model_name).to(DEVICE)
-        dataset = RandomBodyParamDataset(num_betas=16, num_joints=body_model.num_joints)
-        dataloader = DataLoader(dataset, batch_size=None, num_workers=4, pin_memory=True)
+        body_model = smplfitter_pt.BodyModel(body_model_name, num_betas=16).to(DEVICE)
 
         for n_verts_subset in reversed(
             [32, 64, 128, 256, 512, 1024, 2048, 4096, body_model.num_vertices]
@@ -44,8 +39,6 @@ def main():
                 f'{DATA_ROOT}/body_models/{body_model_name}/'
                 f'vertex_subset_joint_regr_post_lbs_{n_verts_subset}.npy'
             )
-            # if os.path.exists(out_path):
-            #     continue
 
             if n_verts_subset == body_model.num_vertices:
                 i_verts = torch.arange(body_model.num_vertices)
@@ -55,32 +48,63 @@ def main():
                 )
                 i_verts = torch.from_numpy(subset['i_verts'])
 
-            model = ConvexCombiningRegressor(len(i_verts), body_model.num_joints).to(DEVICE)
-            trainer = ConvexCombiningRegressorTrainer(
-                model=model,
-                body_model=body_model,
-                template_verts=canonical_verts[i_verts],
-                vertex_subset=i_verts,
-                regul_lambda=6e-5,
-            )
-            optimizer = optim.Adam(model.parameters(), lr=1e0)
-            scheduler = optim.lr_scheduler.LambdaLR(
-                optimizer, lr_lambda=lambda step: 1.0 if step < int(37500 * 0.9) else 1e-3
-            )
-            trainer.train_loop(
-                dataloader, total_steps=37500, optimizer=optimizer, scheduler=scheduler
-            )
-            model.threshold_for_sparsity(1e-3)
+            regressor = train_post_lbs_regressor(body_model, i_verts)
+            print(f'Sparsity ratio: {sparsity_ratio(regressor)}')
+            np.save(out_path, regressor)
 
-            scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: 30)
-            trainer.train_loop(
-                dataloader, total_steps=37500 + 12500, optimizer=optimizer, scheduler=scheduler
-            )
-            model.threshold_for_sparsity(1e-3)
 
-            J_subset = model.get_w().cpu().detach().numpy().T
-            print(f'Sparsity ratio: {sparsity_ratio(J_subset)}')
-            np.save(out_path, J_subset)
+def train_post_lbs_regressor(body_model, i_verts, device=None, total_steps=50000):
+    """Train a post-LBS joint regressor for a vertex subset.
+
+    Finds a sparse, convex-combining linear regressor that maps posed vertex positions
+    (after LBS) to joint positions. Trained on random body parameters.
+
+    Args:
+        body_model: A smplfitter.pt.BodyModel instance.
+        i_verts: Tensor of vertex indices defining the subset.
+        device: Torch device (default: CUDA if available, else CPU).
+        total_steps: Total training steps (75% main training + 25% fine-tuning).
+
+    Returns:
+        numpy array of shape (n_joints, n_verts_subset), the regressor matrix.
+    """
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    body_model = body_model.to(device)
+    i_verts = i_verts.to(device)
+    with torch.no_grad():
+        template_verts = body_model.single()['vertices'][i_verts]
+
+    dataset = RandomBodyParamDataset(
+        num_betas=body_model.num_betas, num_joints=body_model.num_joints
+    )
+    dataloader = DataLoader(dataset, batch_size=None, num_workers=4, pin_memory=True)
+
+    model = ConvexCombiningRegressor(len(i_verts), body_model.num_joints).to(device)
+    trainer = ConvexCombiningRegressorTrainer(
+        model=model,
+        body_model=body_model,
+        template_verts=template_verts,
+        vertex_subset=i_verts,
+        regul_lambda=6e-5,
+    )
+
+    # Phase 1: main training with sparsification
+    phase1_steps = int(total_steps * 0.75)
+    optimizer = optim.Adam(model.parameters(), lr=1e0)
+    scheduler = optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=lambda step: 1.0 if step < int(phase1_steps * 0.9) else 1e-3
+    )
+    trainer.train_loop(dataloader, total_steps=phase1_steps, optimizer=optimizer, scheduler=scheduler)
+    model.threshold_for_sparsity(1e-3)
+
+    # Phase 2: fine-tuning with fixed sparsity pattern
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda step: 30)
+    trainer.train_loop(dataloader, total_steps=total_steps, optimizer=optimizer, scheduler=scheduler)
+    model.threshold_for_sparsity(1e-3)
+
+    return model.get_w().cpu().detach().numpy().T
 
 
 class ConvexCombiningRegressor(nn.Module):
