@@ -7,7 +7,8 @@ import scipy.optimize
 import scipy.spatial.distance
 import torch
 import torch.nn as nn
-from .bodyconverter import load_vertex_converter_csr, scipy2torch_csr
+from ..common import load_vertex_converter_csr
+from .bodyconverter import scipy2torch_csr
 from . import bodyfitter as _bodyfitter
 
 if TYPE_CHECKING:

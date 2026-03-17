@@ -120,7 +120,7 @@ def initialize(
             if filename.endswith('.npz'):
                 smpl_data = np.load(filepath)
             else:
-                with open(filepath, 'rb') as f:
+                with open(filepath, 'rb') as f, scipy_sparse_forward_compat():
                     smpl_data = pickle.load(f, encoding='latin1')
         except FileNotFoundError:
             raise FileNotFoundError(
@@ -221,6 +221,40 @@ def initialize(
         num_vertices=len(vertex_subset),
         vertex_subset=vertex_subset,
     )
+
+
+@contextlib.contextmanager
+def scipy_sparse_forward_compat():
+    """Patch sys.modules so pickles saved with old scipy.sparse submodule paths
+    (e.g. scipy.sparse.coo.coo_matrix) can still be loaded after SciPy 2.0
+    removes those submodules."""
+    import scipy.sparse
+    saved = {}
+    for name in ['coo', 'csr', 'csc']:
+        mod_path = f'scipy.sparse.{name}'
+        saved[mod_path] = sys.modules.get(mod_path)
+        sys.modules[mod_path] = scipy.sparse
+    try:
+        yield
+    finally:
+        for mod_path, old_val in saved.items():
+            if old_val is None:
+                sys.modules.pop(mod_path, None)
+            else:
+                sys.modules[mod_path] = old_val
+
+
+def load_pickle(path):
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+
+
+def load_vertex_converter_csr(vertex_converter_path):
+    """Load a vertex converter sparse matrix from a pickle file."""
+    import scipy.sparse
+    with scipy_sparse_forward_compat():
+        scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
+    return scipy_csr[:, : scipy_csr.shape[1] // 2]
 
 
 @contextlib.contextmanager

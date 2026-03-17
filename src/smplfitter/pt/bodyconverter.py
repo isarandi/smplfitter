@@ -1,20 +1,19 @@
 from __future__ import annotations
 import os
-import pickle
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import torch
 import torch.nn as nn
 from . import bodyfitter as _bodyfitter
+from ..common import load_vertex_converter_csr
 
 if TYPE_CHECKING:
     import smplfitter.pt
 
 
 class BodyConverter(nn.Module):
-    """
-    Converts between different SMPL-family body model parameters.
+    """Converts between different SMPL-family body model parameters.
 
     Parameters:
         body_model_in: Input body model to convert from.
@@ -151,14 +150,7 @@ class BodyConverter(nn.Module):
         return r.reshape(self.body_model_out.num_vertices, -1, 3).permute(1, 0, 2)
 
 
-def load_vertex_converter_csr(vertex_converter_path):
-    scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
-    return scipy_csr[:, : scipy_csr.shape[1] // 2]
 
-
-def load_pickle(path):
-    with open(path, 'rb') as f:
-        return pickle.load(f)
 
 
 def scipy2torch_csr(sparse_matrix):

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from .bodymodel import BodyModel
 from .bodyfitter import BodyFitter
-from .bodyconverter import load_vertex_converter_csr, load_pickle
+from ..common import load_vertex_converter_csr, load_pickle
 import os
 import torch.nn as nn
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import pickle
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -149,14 +148,7 @@ class BodyConverter:
         )
 
 
-def load_vertex_converter_csr(vertex_converter_path: str) -> scipy.sparse.csr_matrix:
-    scipy_csr = load_pickle(vertex_converter_path)['mtx'].tocsr().astype(np.float32)
-    return scipy_csr[:, : scipy_csr.shape[1] // 2]
-
-
-def load_pickle(path: str):
-    with open(path, 'rb') as f:
-        return pickle.load(f)
+from ..common import load_vertex_converter_csr  # noqa: F401, E402
 
 
 def scipy2tf_sparse(sparse_matrix: scipy.sparse.csr_matrix) -> tf.SparseTensor:
