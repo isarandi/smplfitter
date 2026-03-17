@@ -22,10 +22,21 @@ _set_module_for_docs(__name__, globals(), __all__)
 
 @functools.lru_cache()
 def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):
-    return get_body_model(model_name, gender, model_root)
+    """Return a cached BodyModel instance, creating it on first call.
 
 
-def get_body_model(model_name, gender, model_root=None, num_betas=None, vertex_subset=None):
+    Parameters:
+        model_name: Body model type (``'smpl'``, ``'smplx'``, ``'smplh'``, etc.).
+        gender: Gender (``'neutral'``, ``'female'``, ``'male'``).
+        model_root: Path to model directory. See :class:`BodyModel` for defaults.
+
+    Returns:
+        A :class:`BodyModel` instance (shared, do not modify in place).
+    """
+    return _get_body_model(model_name, gender, model_root)
+
+
+def _get_body_model(model_name, gender, model_root=None, num_betas=None, vertex_subset=None):
     return BodyModel(
         model_root=model_root,
         gender=gender,
@@ -92,7 +103,7 @@ def get_fit_fn(
     scale_regularizer=0,
     kid_regularizer=None,
 ):
-    body_model = get_body_model(
+    body_model = _get_body_model(
         body_model_name, gender, num_betas=num_betas, vertex_subset=vertex_subset
     )
     fitter = BodyFitter(body_model, enable_kid=enable_kid)

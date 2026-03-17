@@ -21,17 +21,27 @@ __all__ = [
     'BodyFlipper',
     'get_cached_body_model',
     'get_cached_fit_fn',
-    'fit',
 ]
 _set_module_for_docs(__name__, globals(), __all__)
 
 
 @functools.lru_cache()
 def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):
-    return get_body_model(model_name, gender, model_root)
+    """Return a cached BodyModel instance, creating it on first call.
 
 
-def get_body_model(model_name, gender, model_root=None):
+    Parameters:
+        model_name: Body model type (``'smpl'``, ``'smplx'``, ``'smplh'``, etc.).
+        gender: Gender (``'neutral'``, ``'female'``, ``'male'``).
+        model_root: Path to model directory. See :class:`BodyModel` for defaults.
+
+    Returns:
+        A :class:`BodyModel` instance (shared, do not modify in place).
+    """
+    return _get_body_model(model_name, gender, model_root)
+
+
+def _get_body_model(model_name, gender, model_root=None):
     return BodyModel(model_root=model_root, gender=gender, model_name=model_name)
 
 
@@ -112,45 +122,3 @@ def get_cached_fit_fn(
         return wrapped
 
 
-def fit(
-    verts: torch.Tensor,
-    joints: Optional[torch.Tensor] = None,
-    vertex_weights: Optional[torch.Tensor] = None,
-    joint_weights: Optional[torch.Tensor] = None,
-    body_model_name='smpl',
-    gender='neutral',
-    num_betas=10,
-    enable_kid=False,
-    requested_keys=('pose_rotvecs', 'shape_betas', 'trans'),
-    beta_regularizer=1.0,
-    beta_regularizer2=0.0,
-    num_iter=3,
-    vertex_subset=None,
-    joint_regressor=None,
-    share_beta=False,
-    final_adjust_rots=True,
-    scale_target=False,
-    scale_fit=False,
-    scale_regularizer=0.0,
-    kid_regularizer=None,
-):
-    fit_fn = get_cached_fit_fn(
-        body_model_name,
-        gender,
-        num_betas,
-        enable_kid,
-        requested_keys,
-        beta_regularizer,
-        beta_regularizer2,
-        num_iter,
-        vertex_subset,
-        joint_regressor,
-        share_beta,
-        final_adjust_rots,
-        scale_target,
-        scale_fit,
-        scale_regularizer,
-        kid_regularizer,
-        device=str(verts.device),
-    )
-    return fit_fn(verts, joints, vertex_weights, joint_weights)

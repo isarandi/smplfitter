@@ -16,8 +16,19 @@ _set_module_for_docs(__name__, globals(), __all__)
 
 @functools.lru_cache()
 def get_cached_body_model(model_name='smpl', gender='neutral', model_root=None):
-    return get_body_model(model_name, gender, model_root)
+    """Return a cached BodyModel instance, creating it on first call.
 
 
-def get_body_model(model_name, gender, model_root=None):
+    Parameters:
+        model_name: Body model type (``'smpl'``, ``'smplx'``, ``'smplh'``, etc.).
+        gender: Gender (``'neutral'``, ``'female'``, ``'male'``).
+        model_root: Path to model directory. See :class:`BodyModel` for defaults.
+
+    Returns:
+        A :class:`BodyModel` instance (shared, do not modify in place).
+    """
+    return _get_body_model(model_name, gender, model_root)
+
+
+def _get_body_model(model_name, gender, model_root=None):
     return BodyModel(model_root=model_root, gender=gender, model_name=model_name)
