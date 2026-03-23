@@ -126,8 +126,7 @@ def _download_mpi(opener, auth_data, domain, filename, peek_only=False):
         if e.code in (401, 403):
             reg_url = _DOMAIN_REGISTRATION_URLS.get(domain, '???')
             print(
-                f'\nAuthentication failed for "{domain}" domain.\n'
-                f'Register at {reg_url}',
+                f'\nAuthentication failed for "{domain}" domain.\n' f'Register at {reg_url}',
                 file=sys.stderr,
             )
             sys.exit(1)

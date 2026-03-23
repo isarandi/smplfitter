@@ -442,11 +442,13 @@ def _chumpy_stub_modules():
 
     class _ChStub:
         """Stub for chumpy.ch.Ch — wraps a numpy array in .x"""
+
         def __array__(self, dtype=None):
             return np.array(self.x, dtype=dtype)
 
     class _SelectStub:
         """Stub for chumpy.reordering.Select — flat-indexes .a with .idxs"""
+
         def __array__(self, dtype=None):
             result = np.array(self.a, dtype=dtype).ravel()[self.idxs]
             if hasattr(self, 'preferred_shape') and self.preferred_shape is not None:
