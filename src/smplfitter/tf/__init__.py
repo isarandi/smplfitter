@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import functools
 
-import tensorflow as tf
-from .bodymodel import BodyModel
-from .bodyfitter import BodyFitter
-from .bodyconverter import BodyConverter
+try:
+    import tensorflow as tf
+    from .bodymodel import BodyModel
+    from .bodyfitter import BodyFitter
+    from .bodyconverter import BodyConverter
+except ImportError as e:
+    if 'tensorflow' in str(e).lower():
+        raise ImportError(
+            'smplfitter.tf requires TensorFlow. Install it with: '
+            "pip install 'smplfitter[tensorflow]'"
+        ) from e
+    raise
 from smplfitter.common import _set_module_for_docs
 
 __all__ = [

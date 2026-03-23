@@ -5,12 +5,20 @@ from __future__ import annotations
 from typing import Optional
 
 import functools
-import torch
 import warnings
-from .bodymodel import BodyModel
-from .bodyfitter import BodyFitter
-from .bodyconverter import BodyConverter
-from .bodyflipper import BodyFlipper
+
+try:
+    import torch
+    from .bodymodel import BodyModel
+    from .bodyfitter import BodyFitter
+    from .bodyconverter import BodyConverter
+    from .bodyflipper import BodyFlipper
+except ImportError as e:
+    if 'torch' in str(e).lower():
+        raise ImportError(
+            'smplfitter.pt requires PyTorch. Install it with: ' "pip install 'smplfitter[pytorch]'"
+        ) from e
+    raise
 from smplfitter.common import _set_module_for_docs
 
 

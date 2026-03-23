@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import functools
 
-from .bodymodel import BodyModel
-from .bodyfitter import BodyFitter
-from .bodyconverter import BodyConverter
-from . import rotation
+try:
+    from .bodymodel import BodyModel
+    from .bodyfitter import BodyFitter
+    from .bodyconverter import BodyConverter
+    from . import rotation
+except ImportError as e:
+    if 'jax' in str(e).lower():
+        raise ImportError(
+            'smplfitter.jax requires JAX. Install it with: ' "pip install 'smplfitter[jax]'"
+        ) from e
+    raise
 from smplfitter.common import _set_module_for_docs
 
 __all__ = ['BodyModel', 'BodyFitter', 'BodyConverter', 'get_cached_body_model', 'rotation']
