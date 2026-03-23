@@ -477,7 +477,7 @@ class SMPLXLibBackend(Backend):
         import os
         import torch
         import smplx as smplx_lib
-        from smplfitter.common import monkey_patched_for_chumpy
+        from smplfitter.common import _chumpy_stub_modules
 
         self.torch = torch
         self.gpu = gpu
@@ -485,7 +485,7 @@ class SMPLXLibBackend(Backend):
         self.model_type = model_type
 
         DATA_ROOT = os.environ.get('DATA_ROOT', '.')
-        with monkey_patched_for_chumpy():
+        with _chumpy_stub_modules():
             # For SMPLX, use use_pca=False to work with full 45-dim hand poses
             kwargs = {'gender': 'neutral', 'num_betas': 10, 'ext': 'npz'}
             if model_type == 'smplx':

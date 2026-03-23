@@ -4,7 +4,14 @@ Usage::
 
     python -m smplfitter.download [target_directory]
 
-Requires registration at https://smpl.is.tue.mpg.de/ beforehand.
+Requires separate registration at each of these sites beforehand:
+
+- https://smpl.is.tue.mpg.de/ (SMPL)
+- https://smpl-x.is.tue.mpg.de/ (SMPL-X)
+- https://mano.is.tue.mpg.de/ (MANO and SMPL+H)
+- https://agora.is.tue.mpg.de/ (kid body templates)
+
+Use the same email and password for all registrations.
 """
 
 from __future__ import annotations
@@ -35,8 +42,13 @@ def main():
 
     print(f'Body models will be saved to: {body_models_dir}')
     print()
-    print('You need an account at https://smpl.is.tue.mpg.de/')
-    print('(Register there first if you have not already.)')
+    print('You need to register at each of these sites:')
+    print('  - https://smpl.is.tue.mpg.de/       (SMPL)')
+    print('  - https://smpl-x.is.tue.mpg.de/     (SMPL-X)')
+    print('  - https://mano.is.tue.mpg.de/       (MANO and SMPL+H)')
+    print('  - https://agora.is.tue.mpg.de/      (kid body templates)')
+    print()
+    print('Use the same email and password for all registrations.')
     print()
     email = input('Email: ')
     password = getpass.getpass('Password: ')
@@ -45,19 +57,6 @@ def main():
     username_enc = urllib.parse.quote(email, safe='')
     password_enc = urllib.parse.quote(password, safe='')
     auth_data = f'username={username_enc}&password={password_enc}'.encode()
-
-    # Verify credentials with a small download before doing the big ones
-    print()
-    print('Verifying credentials...')
-    try:
-        _download_mpi(opener, auth_data, 'smpl', 'SMPL_python_v.1.1.0.zip', peek_only=True)
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            print('Authentication failed. Check your email and password.', file=sys.stderr)
-            sys.exit(1)
-        raise
-    print('OK')
-    print()
 
     _download_smpl(opener, auth_data, body_models_dir)
     _download_smplx(opener, auth_data, body_models_dir)
@@ -106,6 +105,14 @@ def _make_opener():
     )
 
 
+_DOMAIN_REGISTRATION_URLS = {
+    'smpl': 'https://smpl.is.tue.mpg.de/',
+    'smplx': 'https://smpl-x.is.tue.mpg.de/',
+    'mano': 'https://mano.is.tue.mpg.de/',
+    'agora': 'https://agora.is.tue.mpg.de/',
+}
+
+
 def _download_mpi(opener, auth_data, domain, filename, peek_only=False):
     """Download a file from the MPI server with POST authentication."""
     url = (
@@ -113,7 +120,18 @@ def _download_mpi(opener, auth_data, domain, filename, peek_only=False):
         f'?domain={domain}&resume=1&sfile={urllib.parse.quote(filename)}'
     )
     req = urllib.request.Request(url, data=auth_data, method='POST')
-    response = opener.open(req)
+    try:
+        response = opener.open(req)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            reg_url = _DOMAIN_REGISTRATION_URLS.get(domain, '???')
+            print(
+                f'\nAuthentication failed for "{domain}" domain.\n'
+                f'Register at {reg_url}',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise
     if peek_only:
         response.read(1024)
         response.close()

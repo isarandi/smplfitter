@@ -5,7 +5,6 @@ import os
 import os.path as osp
 import pickle
 import sys
-import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -239,7 +238,7 @@ def initialize(
                 body_models_dir = _default_body_models_dir()
         model_root = f'{body_models_dir}/{model_name}'
 
-    with monkey_patched_for_chumpy():
+    with _chumpy_stub_modules():
         gender_maps = {
             'smpl': dict(f='f', m='m', n='neutral'),
             'smplx': dict(f='FEMALE', m='MALE', n='NEUTRAL'),
@@ -292,7 +291,11 @@ def initialize(
                 f'  3. export DATA_ROOT=/your/path   '
                 f'(looks for $DATA_ROOT/body_models/)\n\n'
                 f'Download models: python -m smplfitter.download\n'
-                f'Register first at https://smpl.is.tue.mpg.de/'
+                f'Register first at the relevant site(s):\n'
+                f'  https://smpl.is.tue.mpg.de/     (SMPL)\n'
+                f'  https://smpl-x.is.tue.mpg.de/   (SMPL-X)\n'
+                f'  https://mano.is.tue.mpg.de/     (MANO/SMPL+H)\n'
+                f'  https://agora.is.tue.mpg.de/    (kid templates)'
             ) from None
 
     res = {}
@@ -427,60 +430,44 @@ def load_vertex_converter_csr(vertex_converter_path):
 
 
 @contextlib.contextmanager
-def monkey_patched_for_chumpy():
-    """The pickle file of SMPLH imports chumpy and it tries to import np.bool etc which are
-    not available anymore.
+def _chumpy_stub_modules():
+    """Register lightweight chumpy stub classes in sys.modules so that pickle files
+    containing chumpy objects (Ch, Select) can be loaded without installing chumpy.
+
+    The official SMPL/SMPL+H/MANO .pkl files store shapedirs as chumpy objects.
+    These stubs implement just enough to unpickle them and convert to numpy arrays
+    via np.array().
     """
-    added = []
-    for name in ['bool', 'int', 'object', 'str']:
-        if name not in dir(np):
-            try:
-                sys.modules[f'numpy.{name}'] = getattr(np, name + '_')
-                added.append(name)
-            except AttributeError:
-                pass
+    import types
 
-    sys.modules['numpy.float'] = float
-    sys.modules['numpy.complex'] = np.complex128
-    sys.modules['numpy.NINF'] = -np.inf
-    np.NINF = -np.inf  # type: ignore[misc]
-    np.complex = np.complex128  # type: ignore[misc]
-    np.float = float  # type: ignore[misc]
+    class _ChStub:
+        """Stub for chumpy.ch.Ch — wraps a numpy array in .x"""
+        def __array__(self, dtype=None):
+            return np.array(self.x, dtype=dtype)
 
-    if 'unicode' not in dir(np):
-        sys.modules['numpy.unicode'] = np.str_
-        added.append('unicode')
+    class _SelectStub:
+        """Stub for chumpy.reordering.Select — flat-indexes .a with .idxs"""
+        def __array__(self, dtype=None):
+            result = np.array(self.a, dtype=dtype).ravel()[self.idxs]
+            if hasattr(self, 'preferred_shape') and self.preferred_shape is not None:
+                return result.reshape(self.preferred_shape)
+            return result
 
-    import inspect
+    stub_modules = {
+        'chumpy': types.ModuleType('chumpy'),
+        'chumpy.ch': types.ModuleType('chumpy.ch'),
+        'chumpy.reordering': types.ModuleType('chumpy.reordering'),
+    }
+    stub_modules['chumpy.ch'].Ch = _ChStub
+    stub_modules['chumpy.reordering'].Select = _SelectStub
 
-    added_getargspec = False
-    if not hasattr(inspect, 'getargspec'):
-        inspect.getargspec = inspect.getfullargspec
-        added_getargspec = True
-
-    # Patch scipy.sparse.linalg.interface for chumpy's
-    # `from scipy.sparse.linalg.interface import LinearOperator`
-    # which will break in SciPy 2.0.
-    import scipy.sparse.linalg
-
-    scipy_patched = {}
-    for mod_path, target in [('scipy.sparse.linalg.interface', scipy.sparse.linalg)]:
-        saved = sys.modules.get(mod_path)
-        sys.modules[mod_path] = target
-        scipy_patched[mod_path] = saved
-
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', FutureWarning)
+    saved = {mod_path: sys.modules.get(mod_path) for mod_path in stub_modules}
+    sys.modules.update(stub_modules)
+    try:
         yield
-
-    for name in added:
-        del sys.modules[f'numpy.{name}']
-
-    if added_getargspec:
-        del inspect.getargspec
-
-    for mod_path, old_val in scipy_patched.items():
-        if old_val is None:
-            sys.modules.pop(mod_path, None)
-        else:
-            sys.modules[mod_path] = old_val
+    finally:
+        for mod_path, old_val in saved.items():
+            if old_val is None:
+                sys.modules.pop(mod_path, None)
+            else:
+                sys.modules[mod_path] = old_val
