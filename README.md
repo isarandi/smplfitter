@@ -8,7 +8,7 @@ Example use cases:
 * You extracted nonparametric vertex and joint estimates from an RGB image, e.g. using [Neural Localizer Fields (NLF)](https://virtualhumans.mpi-inf.mpg.de/nlf), and want to express this estimate in parametric form, for example to feed it to another model that expects body model parameters.
 * You want to convert between body models. For example, you have SMPL parameters from some dataset but need SMPL-X parameters as input to some pretrained model (or vice versa).
 
-We provide the implementation in **PyTorch, TensorFlow and NumPy**. 
+We provide the implementation in **PyTorch, TensorFlow, NumPy, JAX, and Numba**. Import from the backend you need: `from smplfitter.pt import ...` for PyTorch, `from smplfitter.np import ...` for NumPy, etc.
 
 The algorithm is **fast**, optimized for **batch** processing, can run on the **GPU** and is **differentiable**. There are no learnable parameters here, nor sensitivity to initialization. Just solving equation systems.
 
@@ -19,11 +19,35 @@ It can fit a batch of 4096 instances in 423 ms on a single RTX 3090 GPU giving a
 
 ```bash
 pip install smplfitter
+
+# Install with a specific backend
+pip install 'smplfitter[pytorch]'   # PyTorch
+pip install 'smplfitter[tensorflow]' # TensorFlow
+pip install 'smplfitter[jax]'       # JAX
+pip install 'smplfitter[numba]'     # Numba
 ```
 
 ### Download Body Model Files
 
-You need to download the body model data files from the corresponding websites for this code to work. You only need the ones that you plan to use. There should be a `DATA_ROOT` environment variable under which a `body_models` directory should look like this:
+Download the model files using the built-in downloader (requires registration at each site first):
+
+```bash
+python -m smplfitter.download
+```
+
+You need to register separately at each of these sites:
+- https://smpl.is.tue.mpg.de/ (SMPL)
+- https://smpl-x.is.tue.mpg.de/ (SMPL-X)
+- https://mano.is.tue.mpg.de/ (MANO and SMPL+H)
+- https://agora.is.tue.mpg.de/ (kid body templates)
+
+At runtime, SMPLFitter looks for body model files in these locations (in order):
+1. `$SMPLFITTER_BODY_MODELS/`
+2. `$DATA_ROOT/body_models/`
+3. `./body_models/`
+4. `~/.local/share/smplfitter/body_models/` on Linux, `~/Library/Application Support/smplfitter/body_models/` on macOS
+
+The `body_models` directory should look like this:
 
 ```
 $DATA_ROOT/body_models
@@ -50,8 +74,6 @@ $DATA_ROOT/body_models
 └── smplx2smpl_deftrafo_setup.pkl
 ```
 
-You can refer to the relevant [script](https://github.com/isarandi/posepile/tree/main/posepile/src/get_body_models.sh) in the PosePile repo about how to download these files.
-
 ## Usage Examples
 
 ### Basic Fitting
@@ -70,7 +92,7 @@ vertices = torch.rand((batch_size, 6890, 3)).cuda()
 joints = torch.rand((batch_size, 24, 3)).cuda()
 
 # Do the fitting!
-fit_res = fitter.fit(vertices, joints, num_iter=3, beta_regularizer=1)
+fit_res = fitter.fit(target_vertices=vertices, target_joints=joints, num_iter=3, beta_regularizer=1)
 fit_res['pose_rotvecs'], fit_res['shape_betas'], fit_res['trans']
 ```
 
@@ -90,7 +112,7 @@ pose_rotvecs_in = torch.rand((batch_size, 72)).cuda()
 shape_betas_in = torch.rand((batch_size, 10)).cuda()
 trans_in = torch.rand((batch_size, 3)).cuda()
 
-out = smpl2smplx.convert(pose_rotvecs_in, shape_betas_in, trans_in)
+out = smpl2smplx.convert(pose_rotvecs=pose_rotvecs_in, shape_betas=shape_betas_in, trans=trans_in)
 out['pose_rotvecs'], out['shape_betas'], out['trans']
 ```
 
