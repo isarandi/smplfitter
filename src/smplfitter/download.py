@@ -238,6 +238,18 @@ def _download_smplx(opener, auth_data, body_models_dir):
                 if basename.endswith('.npz'):
                     _extract_zip_member(zf, member, smplx_dir / basename)
 
+        # MANO/FLAME vertex correspondences
+        zip_path = Path(tmp) / 'smplx_mano_flame_correspondences.zip'
+        _download_mpi_to_file(
+            opener, auth_data, 'smplx', 'smplx_mano_flame_correspondences.zip', zip_path
+        )
+        print('  Extracting MANO/FLAME correspondences...')
+        with zipfile.ZipFile(zip_path) as zf:
+            for member in zf.namelist():
+                basename = os.path.basename(member)
+                if basename.endswith(('.pkl', '.npy')):
+                    _extract_zip_member(zf, member, smplx_dir / basename)
+
     # Download SMPLX_to_J14 from HuggingFace
     j14_path = smplx_dir / 'SMPLX_to_J14.pkl'
     if not j14_path.exists():
@@ -288,6 +300,10 @@ def _download_smplh(opener, auth_data, body_models_dir):
                         dest = smplh16_dir / gender / 'model.npz'
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         _extract_tar_member(tf, member, dest)
+
+    # Create convenience symlinks (some tools expect uppercase gender)
+    _symlink(smplh_dir / 'SMPLH_FEMALE.pkl', 'SMPLH_female.pkl')
+    _symlink(smplh_dir / 'SMPLH_MALE.pkl', 'SMPLH_male.pkl')
 
     print('[smplh] Done.')
 
