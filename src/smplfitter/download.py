@@ -255,7 +255,7 @@ def _download_smplh(opener, auth_data, body_models_dir):
     smplh16_dir = body_models_dir / 'smplh16'
     smplh16_dir.mkdir(parents=True, exist_ok=True)
 
-    target = smplh_dir / 'SMPLH_FEMALE.pkl'
+    target = smplh_dir / 'SMPLH_female.pkl'
     if target.exists():
         print('[smplh] Already downloaded, skipping.')
         return
@@ -368,7 +368,7 @@ def _download_correspondences(opener, auth_data, body_models_dir):
             opener,
             auth_data,
             'smplx',
-            'smplx_mano_flame_correspondences.zip',
+            'model_transfer.zip',
             zip_path,
         )
         print('  Extracting...')
