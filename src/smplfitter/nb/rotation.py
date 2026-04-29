@@ -141,7 +141,7 @@ def mat2rotvec(rotmat):
     _1p22 = np.float32(1.0) + r22
     _1m22 = np.float32(1.0) - r22
 
-    trace = r00 + r11 + r22
+    trace = p00p11 + r22
     cond0 = np.stack((p21m12, p02m20, p10m01, np.float32(1.0) + trace), axis=-1)
     cond1 = np.stack((_1m22 + p00m11, p10p01, p02p20, p21m12), axis=-1)
     cond2 = np.stack((p10p01, _1m22 - p00m11, p21p12, p02m20), axis=-1)
