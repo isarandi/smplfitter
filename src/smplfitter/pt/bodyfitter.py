@@ -814,11 +814,11 @@ class BodyFitter(nn.Module):
             'bjCc,lj,lcs->blCs', glob_rotmats, self.body_model.weights, shapedirs
         )
 
-        v_rotated_ext = torch.cat([v_rotated.unsqueeze(-1), v_grad_rotated], dim=3)
-        v_translations_ext = torch.einsum(
+        # In-place add avoids allocating a third full-size (B, V, 3, S+1) tensor.
+        v_posed_posed_ext = torch.cat([v_rotated.unsqueeze(-1), v_grad_rotated], dim=3)
+        v_posed_posed_ext += torch.einsum(
             'vj,bjcs->bvcs', self.body_model.weights, translations_ext
         )
-        v_posed_posed_ext = v_translations_ext + v_rotated_ext
 
         if target_joints is None:
             target_both = target_vertices

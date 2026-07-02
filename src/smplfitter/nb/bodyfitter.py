@@ -1327,61 +1327,67 @@ def _fit_shape_core(
                     val += posedirs[v, c, p] * rot_params[b, p]
                 v_posed[b, v, c] = val
 
-    # 5. Compute v_rotated = einsum('bjCc,vj,bvc->bvC', glob_rotmats, weights, v_posed)
-    v_rotated = np.empty((batch_size, num_vertices, 3), dtype=np.float32)
-    for v in numba.prange(num_vertices):
-        for b in range(batch_size):
-            for C in range(3):
-                val = np.float32(0.0)
-                for j in range(num_joints):
-                    w = weights[v, j]
-                    if w != 0.0:
-                        for c in range(3):
-                            val += glob_rotmats[b, j, C, c] * w * v_posed[b, v, c]
-                v_rotated[b, v, C] = val
-
-    # 6. Compute v_grad_rotated = einsum('bjCc,lj,lcs->blCs', glob_rotmats, weights, shapedirs)
+    # 5. Fused blend: hoist the per-vertex blended rotation (sum_j w R_j, 9 scalars) once
+    # per (v, b) and reuse it for v_rotated and every shape-gradient column, accumulating
+    # the translation blend in the same pass. This replaces the former separate loops for
+    # v_rotated / v_grad_rotated / v_translations_ext, which recomputed the joint blend
+    # per output element and materialized three intermediate arrays.
     n_shape_coeffs = shapedirs.shape[2]
-    v_grad_rotated = np.empty((batch_size, num_vertices, 3, n_shape_coeffs), dtype=np.float32)
-    for v in numba.prange(num_vertices):
-        for b in range(batch_size):
-            for C in range(3):
-                for s in range(n_shape_coeffs):
-                    val = np.float32(0.0)
-                    for j in range(num_joints):
-                        w = weights[v, j]
-                        if w != 0.0:
-                            for c in range(3):
-                                val += glob_rotmats[b, j, C, c] * w * shapedirs[v, c, s]
-                    v_grad_rotated[b, v, C, s] = val
-
-    # 7. Compute v_translations_ext = einsum('vj,bjcs->bvcs', weights, translations_ext)
-    v_translations_ext = np.empty((batch_size, num_vertices, 3, n_shape_params), dtype=np.float32)
-    for v in numba.prange(num_vertices):
-        for b in range(batch_size):
-            for c in range(3):
-                for s in range(n_shape_params):
-                    val = np.float32(0.0)
-                    for j in range(num_joints):
-                        w = weights[v, j]
-                        if w != 0.0:
-                            val += w * translations_ext[b, j, c, s]
-                    v_translations_ext[b, v, c, s] = val
-
-    # 8. Combine: v_posed_posed_ext = v_translations_ext + [v_rotated[..., newaxis], v_grad_rotated]
-    # Shape: (batch, num_vertices, 3, 1 + n_shape_coeffs)
     total_params = 1 + n_shape_coeffs
     v_posed_posed_ext = np.empty((batch_size, num_vertices, 3, total_params), dtype=np.float32)
     for v in numba.prange(num_vertices):
         for b in range(batch_size):
-            for c in range(3):
-                # First slot is v_rotated + v_translations_ext[..., 0]
-                v_posed_posed_ext[b, v, c, 0] = v_translations_ext[b, v, c, 0] + v_rotated[b, v, c]
-                # Rest is v_grad_rotated + v_translations_ext[..., 1:]
-                for s in range(n_shape_coeffs):
-                    v_posed_posed_ext[b, v, c, 1 + s] = (
-                        v_translations_ext[b, v, c, 1 + s] + v_grad_rotated[b, v, c, s]
-                    )
+            r00 = np.float32(0.0)
+            r01 = np.float32(0.0)
+            r02 = np.float32(0.0)
+            r10 = np.float32(0.0)
+            r11 = np.float32(0.0)
+            r12 = np.float32(0.0)
+            r20 = np.float32(0.0)
+            r21 = np.float32(0.0)
+            r22 = np.float32(0.0)
+            for j in range(num_joints):
+                w = weights[v, j]
+                if w != 0.0:
+                    r00 += w * glob_rotmats[b, j, 0, 0]
+                    r01 += w * glob_rotmats[b, j, 0, 1]
+                    r02 += w * glob_rotmats[b, j, 0, 2]
+                    r10 += w * glob_rotmats[b, j, 1, 0]
+                    r11 += w * glob_rotmats[b, j, 1, 1]
+                    r12 += w * glob_rotmats[b, j, 1, 2]
+                    r20 += w * glob_rotmats[b, j, 2, 0]
+                    r21 += w * glob_rotmats[b, j, 2, 1]
+                    r22 += w * glob_rotmats[b, j, 2, 2]
+
+            p0 = v_posed[b, v, 0]
+            p1 = v_posed[b, v, 1]
+            p2 = v_posed[b, v, 2]
+
+            for s in range(n_shape_params):
+                # Blended translation for this column (former v_translations_ext)
+                t0 = np.float32(0.0)
+                t1 = np.float32(0.0)
+                t2 = np.float32(0.0)
+                for j in range(num_joints):
+                    w = weights[v, j]
+                    if w != 0.0:
+                        t0 += w * translations_ext[b, j, 0, s]
+                        t1 += w * translations_ext[b, j, 1, s]
+                        t2 += w * translations_ext[b, j, 2, s]
+                if s == 0:
+                    # First column: rotated posed vertex position
+                    v_posed_posed_ext[b, v, 0, 0] = t0 + r00 * p0 + r01 * p1 + r02 * p2
+                    v_posed_posed_ext[b, v, 1, 0] = t1 + r10 * p0 + r11 * p1 + r12 * p2
+                    v_posed_posed_ext[b, v, 2, 0] = t2 + r20 * p0 + r21 * p1 + r22 * p2
+                else:
+                    # Shape-gradient columns: rotated shape directions
+                    sc = s - 1
+                    s0 = shapedirs[v, 0, sc]
+                    s1 = shapedirs[v, 1, sc]
+                    s2 = shapedirs[v, 2, sc]
+                    v_posed_posed_ext[b, v, 0, s] = t0 + r00 * s0 + r01 * s1 + r02 * s2
+                    v_posed_posed_ext[b, v, 1, s] = t1 + r10 * s0 + r11 * s1 + r12 * s2
+                    v_posed_posed_ext[b, v, 2, s] = t2 + r20 * s0 + r21 * s1 + r22 * s2
 
     return glob_positions_ext, v_posed_posed_ext
 
