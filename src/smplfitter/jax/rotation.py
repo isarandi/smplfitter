@@ -3,22 +3,41 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 
-def kabsch(X, Y):
-    """Compute optimal rotation matrix from X to Y using Kabsch algorithm.
+def divide_no_nan(a, b):
+    """Safe division that returns zero where the denominator is zero."""
+    safe_b = jnp.where(b == 0, jnp.ones_like(b), b)
+    quotient = a / safe_b
+    return jnp.where(b == 0, jnp.zeros_like(quotient), quotient)
 
-    Args:
-        X: Source points, shape (batch, n_points, 3)
-        Y: Target points, shape (batch, n_points, 3)
 
-    Returns:
-        Rotation matrices, shape (batch, 3, 3)
-    """
-    A = jnp.swapaxes(X, -2, -1) @ Y
+def proj_SO3(A):
+    """Project (..., 3, 3) matrices onto SO(3) — closest rotation in Frobenius norm."""
     U, _, Vh = jnp.linalg.svd(A)
     T = U @ Vh
     has_reflection = (jnp.linalg.det(T) < 0)[..., None, None]
     T_mirror = T - 2 * U[..., -1:] @ Vh[..., -1:, :]
     return jnp.where(has_reflection, T_mirror, T)
+
+
+def kabsch(X, Y):
+    return proj_SO3(jnp.swapaxes(X, -2, -1) @ Y)
+
+
+def align_unit_vectors(a, b):
+    """Closed-form rotation that maps unit vector ``a`` to unit vector ``b``.
+
+    Returns (..., 3, 3). Built from Rodrigues on the axis-angle
+    ``angle * (a x b) / |a x b|`` with ``angle = atan2(|a x b|, a . b)``.
+    The parallel (a == b) and antiparallel (a == -b) limits stay finite —
+    ``divide_no_nan`` returns a zero rotvec, which gives the identity matrix.
+    The antiparallel choice is arbitrary (no canonical 180-deg rotation).
+    """
+    cross = jnp.cross(a, b, axis=-1)
+    dot = jnp.sum(a * b, axis=-1, keepdims=True)
+    sin_a = jnp.linalg.norm(cross, axis=-1, keepdims=True)
+    angle = jnp.arctan2(sin_a, dot)
+    rotvec = divide_no_nan(cross * angle, sin_a)
+    return rotvec2mat(rotvec)
 
 
 def rotvec2mat(rotvec):

@@ -5,7 +5,12 @@ import numpy as np
 import numba
 
 from .lstsq import lstsq, lstsq_partial_share, _solve_cholesky
-from .rotation import mat2rotvec, rotvec2mat_batch
+from .rotation import (
+    mat2rotvec,
+    proj_SO3_single,
+    rotvec2mat_batch,
+    swing_twist_bone,
+)
 
 if TYPE_CHECKING:
     import smplfitter.nb
@@ -987,12 +992,26 @@ def _fit_global_rotations(
     num_joints,
     toe_copy_pairs,
 ):
-    """Fit global rotations using Kabsch algorithm."""
-    batch_size = target_vertices.shape[0]
-    ref_batch = reference_vertices.shape[0]
+    """Global orientation of each body part via swing-twist decomposition.
 
-    mesh_weight = np.float32(1e-6)
-    joint_weight = np.float32(1.0) - mesh_weight
+    Each body part (the vertices dominated by joint i, containing that joint and
+    its child joints) is dispatched on ``n = children_and_self_count[i]``, the
+    number of joints it contains:
+
+    - ``n >= 3``: Kabsch (orthogonal Procrustes) on the joint positions alone,
+      centered at their (unweighted) mean. Vertices are not used.
+    - ``n == 2`` (bone): two exactly-determined steps. The swing aligns the
+      reference bone direction to the target one; the twist about the aligned bone
+      is recovered in closed form from the part vertices (see ``swing_twist_bone``).
+    - ``n == 1`` (leaf part): Kabsch on the part vertices alone, centered at the joint.
+
+    SMPL-family toe parts copy the feet (via ``toe_copy_pairs``). Weights (if given)
+    multiply the reference side of each bilinear sum, exactly as in the other
+    backends.
+    """
+    batch_size = target_vertices.shape[0]
+    rv_batch = reference_vertices.shape[0]
+    rj_batch = reference_joints.shape[0]
 
     glob_rots = np.empty((batch_size, num_joints, 3, 3), dtype=np.float32)
 
@@ -1010,62 +1029,104 @@ def _fit_global_rotations(
                         glob_rots[b, i, r, c] = glob_rots[b, copy_src, r, c]
             continue
 
-        # Get children for this joint
         n_children = children_and_self_count[i]
         n_part_verts = part_vertices_count[i]
 
-        # Run Kabsch for each batch element
         for b in range(batch_size):
-            rb = b if ref_batch > 1 else 0
+            rvb = b if rv_batch > 1 else 0
+            rjb = b if rj_batch > 1 else 0
 
-            # Compute reference joint mean (for centering)
-            ref_center = np.zeros(3, dtype=np.float32)
-            for ci in range(n_children):
-                child_idx = children_and_self[i, ci]
-                for c in range(3):
-                    ref_center[c] += reference_joints[rb, child_idx, c]
-            for c in range(3):
-                ref_center[c] /= n_children
-
-            # Compute target joint mean
-            target_center = np.zeros(3, dtype=np.float32)
-            for ci in range(n_children):
-                child_idx = children_and_self[i, ci]
-                for c in range(3):
-                    target_center[c] += target_joints[b, child_idx, c]
-            for c in range(3):
-                target_center[c] /= n_children
-
-            # Compute A = X.T @ Y where X is target, Y is reference (weighted)
-            A = np.zeros((3, 3), dtype=np.float32)
-
-            # Add vertex contributions (using precomputed indices)
-            for vi in range(n_part_verts):
-                v = part_vertices[i, vi]
-                for r in range(3):
-                    x_val = target_vertices[b, v, r] - target_center[r]
+            if n_children >= 3:
+                # Kabsch on the joint points, centered at their unweighted mean.
+                target_center = np.zeros(3, dtype=np.float32)
+                ref_center = np.zeros(3, dtype=np.float32)
+                for ci in range(n_children):
+                    child_idx = children_and_self[i, ci]
                     for c in range(3):
-                        y_val = (reference_vertices[rb, v, c] - ref_center[c]) * mesh_weight
-                        A[r, c] += x_val * y_val
-
-            # Add joint contributions
-            for ci in range(n_children):
-                child_idx = children_and_self[i, ci]
-                for r in range(3):
-                    x_val = target_joints[b, child_idx, r] - target_center[r]
-                    for c in range(3):
-                        y_val = (reference_joints[rb, child_idx, c] - ref_center[c]) * joint_weight
-                        A[r, c] += x_val * y_val
-
-            # SVD and rotation
-            U, _, Vh = np.linalg.svd(A)
-            T = U @ Vh
-            if np.linalg.det(T) < 0:
-                T = T - np.float32(2.0) * U[:, -1:] @ Vh[-1:, :]
-
-            for r in range(3):
+                        target_center[c] += target_joints[b, child_idx, c]
+                        ref_center[c] += reference_joints[rjb, child_idx, c]
+                inv_n = np.float32(1.0) / np.float32(n_children)
                 for c in range(3):
-                    glob_rots[b, i, r, c] = T[r, c]
+                    target_center[c] *= inv_n
+                    ref_center[c] *= inv_n
+
+                A = np.zeros((3, 3), dtype=np.float32)
+                for ci in range(n_children):
+                    child_idx = children_and_self[i, ci]
+                    if joint_weights is not None:
+                        w = joint_weights[b, child_idx]
+                    else:
+                        w = np.float32(1.0)
+                    for r in range(3):
+                        x_val = target_joints[b, child_idx, r] - target_center[r]
+                        for c in range(3):
+                            y_val = (reference_joints[rjb, child_idx, c] - ref_center[c]) * w
+                            A[r, c] += x_val * y_val
+
+                T = proj_SO3_single(A)
+                for r in range(3):
+                    for c in range(3):
+                        glob_rots[b, i, r, c] = T[r, c]
+
+            elif n_children == 2:
+                # Bone: swing (align the bone) + twist (from vertices), closed form.
+                j0 = children_and_self[i, 0]
+                j1 = children_and_self[i, 1]
+                b_ref = np.empty(3, dtype=np.float32)
+                b_tgt = np.empty(3, dtype=np.float32)
+                target_center = np.empty(3, dtype=np.float32)
+                ref_center = np.empty(3, dtype=np.float32)
+                for c in range(3):
+                    b_ref[c] = reference_joints[rjb, j1, c] - reference_joints[rjb, j0, c]
+                    b_tgt[c] = target_joints[b, j1, c] - target_joints[b, j0, c]
+                    target_center[c] = np.float32(0.5) * (
+                        target_joints[b, j0, c] + target_joints[b, j1, c]
+                    )
+                    ref_center[c] = np.float32(0.5) * (
+                        reference_joints[rjb, j0, c] + reference_joints[rjb, j1, c]
+                    )
+
+                # Part vertex cross-covariance about the children-mean centers.
+                A = np.zeros((3, 3), dtype=np.float32)
+                for vi in range(n_part_verts):
+                    v = part_vertices[i, vi]
+                    if vertex_weights is not None:
+                        w = vertex_weights[b, v]
+                    else:
+                        w = np.float32(1.0)
+                    for r in range(3):
+                        x_val = target_vertices[b, v, r] - target_center[r]
+                        for c in range(3):
+                            y_val = (reference_vertices[rvb, v, c] - ref_center[c]) * w
+                            A[r, c] += x_val * y_val
+
+                R_bone = swing_twist_bone(A, b_ref, b_tgt)
+                for r in range(3):
+                    for c in range(3):
+                        glob_rots[b, i, r, c] = R_bone[r, c]
+
+            else:
+                # Leaf: Kabsch on the part vertices, centered at the joint.
+                j0 = children_and_self[i, 0]
+                A = np.zeros((3, 3), dtype=np.float32)
+                for vi in range(n_part_verts):
+                    v = part_vertices[i, vi]
+                    if vertex_weights is not None:
+                        w = vertex_weights[b, v]
+                    else:
+                        w = np.float32(1.0)
+                    for r in range(3):
+                        x_val = target_vertices[b, v, r] - target_joints[b, j0, r]
+                        for c in range(3):
+                            y_val = (
+                                reference_vertices[rvb, v, c] - reference_joints[rjb, j0, c]
+                            ) * w
+                            A[r, c] += x_val * y_val
+
+                T = proj_SO3_single(A)
+                for r in range(3):
+                    for c in range(3):
+                        glob_rots[b, i, r, c] = T[r, c]
 
     return glob_rots
 

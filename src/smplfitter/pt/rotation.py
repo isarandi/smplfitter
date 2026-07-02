@@ -8,13 +8,47 @@ def divide_no_nan(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return torch.where(b == 0, torch.zeros_like(a / safe_b), a / safe_b)
 
 
-def kabsch(X, Y):
-    A = X.mT @ Y
+def proj_SO3(A):
+    """Project (..., 3, 3) matrices onto SO(3) — closest rotation in Frobenius norm.
+
+    Computes the rotation part of the polar decomposition via SVD, with a sign flip
+    on the last singular vector when the naive product is a reflection.
+    """
     U, _, Vh = torch.linalg.svd(A)
     T = U @ Vh
     has_reflection = (torch.det(T) < 0).unsqueeze(-1).unsqueeze(-1)
     T_mirror = T - 2 * U[..., -1:] @ Vh[..., -1:, :]
     return torch.where(has_reflection, T_mirror, T)
+
+
+def kabsch(X, Y):
+    return proj_SO3(X.mT @ Y)
+
+
+def align_unit_vectors(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Closed-form rotation that maps unit vector ``a`` to unit vector ``b``.
+
+    Returns (..., 3, 3). Built from Rodrigues on the axis-angle
+    ``angle * (a x b) / |a x b|`` with ``angle = atan2(|a x b|, a . b)``.
+    The parallel (a == b) and antiparallel (a == -b) limits stay finite —
+    ``divide_no_nan`` returns a zero rotvec, which gives the identity matrix.
+    The antiparallel choice is arbitrary (no canonical 180-deg rotation).
+    """
+    cross = torch.linalg.cross(a, b, dim=-1)
+    dot = (a * b).sum(dim=-1, keepdim=True)
+    sin_a = torch.linalg.norm(cross, dim=-1, keepdim=True)
+    angle = torch.atan2(sin_a, dot)
+    rotvec = divide_no_nan(cross * angle, sin_a)
+    return rotvec2mat(rotvec)
+
+
+def project_onto_plane(v: torch.Tensor, n_hat: torch.Tensor) -> torch.Tensor:
+    """Component of ``v`` perpendicular to the unit vector ``n_hat``.
+
+    Batched over leading dims; ``n_hat`` broadcasts against ``v``.
+    """
+    parallel = (v * n_hat).sum(dim=-1, keepdim=True) * n_hat
+    return v - parallel
 
 
 def rotvec2mat(rotvec):

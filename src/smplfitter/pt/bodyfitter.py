@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from .lstsq import lstsq, lstsq_partial_share
-from .rotation import kabsch, mat2rotvec, rotvec2mat
+from .rotation import align_unit_vectors, divide_no_nan, mat2rotvec, proj_SO3, rotvec2mat
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -67,6 +67,124 @@ class BodyFitter(nn.Module):
         for i_joint in range(body_model.num_joints - 1, 0, -1):
             i_parent = body_model.kintree_parents[i_joint]
             self.descendants_and_self[i_parent].extend(self.descendants_and_self[i_joint])
+
+        # --- Swing-twist rotation solver precompute (static dispatch and part statistics) ---
+        # We estimate the global orientation of each BODY PART (the partition of the mesh
+        # by dominant skinning weight; part i belongs to joint i). Each part contains its
+        # own joint plus its child joints; parts are bucketed by how many joints they
+        # contain, since the joints pin the part's orientation to different degrees:
+        #   n >= 3 joints: the joints alone determine the orientation (Kabsch on joints)
+        #   n == 2 joints (a bone): the joints pin the bone direction (swing);
+        #       the part's vertices resolve the remaining twist about the bone
+        #   n == 1 joint (leaf part): the vertices alone determine the orientation
+        # SMPL-family toe parts (10, 11) copy the feet (7, 8) and are excluded.
+        J = body_model.num_joints
+        multi_joint_parts: list[int] = []
+        bone_parts: list[int] = []
+        leaf_parts: list[int] = []
+        for i in range(J):
+            if self.is_smpl_family and (i == 10 or i == 11):
+                continue
+            n = len(self.children_and_self[i])
+            if n >= 3:
+                multi_joint_parts.append(i)
+            elif n == 2:
+                bone_parts.append(i)
+            else:
+                leaf_parts.append(i)
+        self.multi_joint_parts = multi_joint_parts
+        self.bone_parts = bone_parts
+        self.leaf_parts = leaf_parts
+
+        # Body parts whose orientation the final adjustment pass refines (re-anchored at
+        # the recomputed joint position; other parts keep their initial orientation).
+        if self.is_smpl_family:
+            self.adjustable_parts = [1, 2, 4, 5, 7, 8, 16, 17, 18, 19]
+        else:
+            self.adjustable_parts = [i for i in range(J)]
+
+        # Vertices that participate in some vertex-based statistic (bone twist, leaf-part
+        # Kabsch, or the final adjustment). Parts whose orientation comes from joints
+        # alone are skipped where possible.
+        stat_parts = sorted(set(bone_parts + leaf_parts + self.adjustable_parts))
+        used_mask = torch.zeros(body_model.num_vertices, dtype=torch.bool)
+        for i in stat_parts:
+            used_mask[self.part_vertex_selectors[i]] = True
+        used_vertex_indices = torch.where(used_mask)[0]
+        self.used_vertex_indices = nn.Buffer(used_vertex_indices)
+
+        # One-hot part membership over the used vertices: row j sums vertices of part j.
+        part_matrix = torch.zeros(J, len(used_vertex_indices))
+        part_matrix[
+            part_assignment[used_vertex_indices], torch.arange(len(used_vertex_indices))
+        ] = 1.0
+        self.part_matrix = nn.Buffer(part_matrix)
+        self.part_counts = nn.Buffer(part_matrix.sum(dim=1).view(1, J, 1))
+
+        # Children-mean centering matrix: row i averages children_and_self[i] joint positions.
+        center_matrix = torch.zeros(J, J)
+        for i in range(J):
+            js = self.children_and_self[i]
+            center_matrix[i, js] = 1.0 / len(js)
+        self.center_matrix = nn.Buffer(center_matrix)
+
+        # Joint membership per multi-joint part (their orientation is Kabsch-fit from joints).
+        mjp_joint_membership = torch.zeros(len(multi_joint_parts), J)
+        for k, i in enumerate(multi_joint_parts):
+            mjp_joint_membership[k, self.children_and_self[i]] = 1.0
+        self.mjp_joint_membership = nn.Buffer(mjp_joint_membership)
+        self.mjp_joint_counts = nn.Buffer(mjp_joint_membership.sum(dim=1).view(1, -1, 1))
+        self.mjp_center_matrix = nn.Buffer(center_matrix[multi_joint_parts])
+
+        # Bone endpoints (start joint, end joint) per bone part.
+        self.bone_pairs = nn.Buffer(
+            torch.tensor(
+                [[self.children_and_self[i][0], self.children_and_self[i][1]] for i in bone_parts],
+                dtype=torch.int64,
+            ).reshape(len(bone_parts), 2)
+        )
+
+        # Assembly permutation: R_concat = cat([R_multi, R_leaf, R_bone]) is scattered back
+        # to per-part order; SMPL toe parts take the feet slots directly (10 <- 7, 11 <- 8).
+        concat_order = multi_joint_parts + leaf_parts + bone_parts
+        inverse_perm = [0] * J
+        for pos, j in enumerate(concat_order):
+            inverse_perm[j] = pos
+        if self.is_smpl_family:
+            inverse_perm[10] = inverse_perm[7]
+            inverse_perm[11] = inverse_perm[8]
+        self.assemble_indices = nn.Buffer(torch.tensor(inverse_perm, dtype=torch.int64))
+
+    def _part_sums(
+        self,
+        target_vertices: torch.Tensor,
+        reference_vertices: torch.Tensor,
+        vertex_weights: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Per-part sufficient statistics for cross-covariances, computed loop-free.
+
+        Returns per-part weighted sums over each part's vertices:
+        ``raw = sum w t a^T`` (B, J, 3, 3), ``s_t = sum w t`` (B, J, 3),
+        ``s_a = sum w a`` (B_ref, J, 3), ``s_w = sum w`` (B or 1, J, 1).
+        The centered cross-covariance about any centers (c_t, c_a) then follows as
+        ``raw - s_t c_a^T - c_t s_a^T + s_w c_t c_a^T``.
+        """
+        t = target_vertices[:, self.used_vertex_indices]
+        a = reference_vertices[:, self.used_vertex_indices]
+        if vertex_weights is not None:
+            w = vertex_weights[:, self.used_vertex_indices]
+            a = a * w.unsqueeze(-1)
+            t_sum_side = t * w.unsqueeze(-1)
+            s_w = self.part_matrix @ w.unsqueeze(-1)
+        else:
+            t_sum_side = t
+            s_w = self.part_counts
+        B = t.shape[0] if t.shape[0] >= a.shape[0] else a.shape[0]
+        outer = (t.unsqueeze(-1) * a.unsqueeze(-2)).reshape(B, t.shape[1], 9)
+        raw = (self.part_matrix @ outer).view(B, -1, 3, 3)
+        s_t = self.part_matrix @ t_sum_side
+        s_a = self.part_matrix @ a
+        return raw, s_t, s_a, s_w
 
     @torch.jit.export
     def fit(
@@ -872,64 +990,90 @@ class BodyFitter(nn.Module):
         vertex_weights: Optional[torch.Tensor],
         joint_weights: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        device = target_vertices.device
-        glob_rots: list[torch.Tensor] = []
-        mesh_weight = torch.tensor(1e-6, device=device, dtype=torch.float32)
-        joint_weight = 1 - mesh_weight
+        """Global orientation of each body part via swing-twist decomposition, batched.
 
+        Parts containing >= 3 joints get a Kabsch fit from their joints alone; leaf parts
+        (1 joint) from their vertices alone. Bone parts (2 joints) are
+        solved in two exactly-determined steps: the swing aligns the bone direction, and
+        the twist about the bone is recovered from the vertices in closed form. For the
+        twist, with ``H = R_swing A^T`` where ``A = sum w t̄ ā^T`` is the part's centered
+        cross-covariance, the optimal angle is ``atan2(b̂ . vee(H), tr(H) - b̂^T H b̂)``.
+        This is the ``mesh_weight -> 0`` limit of a weighted Kabsch fit, computed without
+        the ill-conditioned SVD that such weighting would produce (stable gradients).
+        """
         if target_joints is None or reference_joints is None:
             target_joints = self.body_model.J_regressor_post_lbs @ target_vertices
             reference_joints = self.body_model.J_regressor_post_lbs @ reference_vertices
 
-        for i in range(self.body_model.num_joints):
-            if self.is_smpl_family:
-                # Disable the rotation of toes separately from the feet
-                if i == 10:
-                    glob_rots.append(glob_rots[7])
-                    continue
-                elif i == 11:
-                    glob_rots.append(glob_rots[8])
-                    continue
+        B = target_vertices.shape[0]
 
-            selector = self.part_vertex_selectors[i]
-            default_body_part = reference_vertices[:, selector]
-            estim_body_part = target_vertices[:, selector]
-            weights_body_part = (
-                vertex_weights[:, selector].unsqueeze(-1) * mesh_weight
-                if vertex_weights is not None
-                else mesh_weight
-            )
+        # Per-part vertex cross-covariances about the children-mean centers, loop-free.
+        raw, s_t, s_a, s_w = self._part_sums(target_vertices, reference_vertices, vertex_weights)
+        mt = self.center_matrix @ target_joints  # (B, J, 3)
+        ma = self.center_matrix @ reference_joints  # (B_ref, J, 3)
+        A_vert = (
+            raw
+            - s_t.unsqueeze(-1) * ma.unsqueeze(-2)
+            - mt.unsqueeze(-1) * s_a.unsqueeze(-2)
+            + s_w.unsqueeze(-1) * (mt.unsqueeze(-1) * ma.unsqueeze(-2))
+        )  # (B, J, 3, 3)
 
-            default_joints = reference_joints[:, self.children_and_self[i]]
-            estim_joints = target_joints[:, self.children_and_self[i]]
-            weights_joints = (
-                joint_weights[:, self.children_and_self[i]].unsqueeze(-1) * joint_weight
-                if joint_weights is not None
-                else joint_weight
-            )
+        # Joint-point cross-covariances for the multi-joint parts, loop-free.
+        rj = reference_joints
+        if joint_weights is not None:
+            rj = rj * joint_weights.unsqueeze(-1)
+            tj_sum_side = target_joints * joint_weights.unsqueeze(-1)
+            s_wj = self.mjp_joint_membership @ joint_weights.unsqueeze(-1)
+        else:
+            tj_sum_side = target_joints
+            s_wj = self.mjp_joint_counts
+        outer_j = (target_joints.unsqueeze(-1) * rj.unsqueeze(-2)).reshape(
+            B, target_joints.shape[1], 9
+        )
+        raw_j = (self.mjp_joint_membership @ outer_j).view(B, -1, 3, 3)
+        mtj = self.mjp_center_matrix @ target_joints
+        maj = self.mjp_center_matrix @ reference_joints
+        s_tj = self.mjp_joint_membership @ tj_sum_side
+        s_aj = self.mjp_joint_membership @ rj
+        A_multi = (
+            raw_j
+            - s_tj.unsqueeze(-1) * maj.unsqueeze(-2)
+            - mtj.unsqueeze(-1) * s_aj.unsqueeze(-2)
+            + s_wj.unsqueeze(-1) * (mtj.unsqueeze(-1) * maj.unsqueeze(-2))
+        )
 
-            body_part_mean_reference = torch.mean(default_joints, dim=1, keepdim=True)
-            default_points = torch.cat(
-                [
-                    (default_body_part - body_part_mean_reference) * weights_body_part,
-                    (default_joints - body_part_mean_reference) * weights_joints,
-                ],
-                dim=1,
-            )
+        # Kabsch bucket (multi-joint parts + leaf parts): one batched SVD.
+        A_svd = torch.cat([A_multi, A_vert[:, self.leaf_parts]], dim=1)
+        R_svd = proj_SO3(A_svd)
 
-            body_part_mean_target = torch.mean(estim_joints, dim=1, keepdim=True)
-            estim_points = torch.cat(
-                [
-                    (estim_body_part - body_part_mean_target),
-                    (estim_joints - body_part_mean_target),
-                ],
-                dim=1,
-            )
+        # Bone bucket: batched swing (bone alignment) + twist (from vertices).
+        b_ref = (
+            reference_joints[:, self.bone_pairs[:, 1]] - reference_joints[:, self.bone_pairs[:, 0]]
+        )
+        b_tgt = target_joints[:, self.bone_pairs[:, 1]] - target_joints[:, self.bone_pairs[:, 0]]
+        b_ref_n = divide_no_nan(b_ref, torch.linalg.norm(b_ref, dim=-1, keepdim=True))
+        b_tgt_n = divide_no_nan(b_tgt, torch.linalg.norm(b_tgt, dim=-1, keepdim=True))
+        R_swing = align_unit_vectors(b_ref_n, b_tgt_n)  # (B, n_bones, 3, 3)
 
-            glob_rot = kabsch(estim_points, default_points)
-            glob_rots.append(glob_rot)
+        H = R_swing @ A_vert[:, self.bone_parts].mT
+        trH = H.diagonal(dim1=-2, dim2=-1).sum(-1)
+        bHb = (b_tgt_n.unsqueeze(-2) @ H @ b_tgt_n.unsqueeze(-1)).squeeze(-1).squeeze(-1)
+        # vee_i = eps_ijk H_jk: the vertex cross-product sums, extracted from H.
+        vee = torch.stack(
+            [
+                H[..., 1, 2] - H[..., 2, 1],
+                H[..., 2, 0] - H[..., 0, 2],
+                H[..., 0, 1] - H[..., 1, 0],
+            ],
+            dim=-1,
+        )
+        twist_angle = torch.atan2((b_tgt_n * vee).sum(-1), trH - bHb)
+        R_twist = rotvec2mat(b_tgt_n * twist_angle.unsqueeze(-1))
+        R_bone = R_twist @ R_swing
 
-        return torch.stack(glob_rots, dim=1)
+        # Scatter both buckets back to per-part order (toe parts take the feet slots).
+        R_concat = torch.cat([R_svd, R_bone], dim=1)
+        return R_concat[:, self.assemble_indices]
 
     def _fit_global_rotations_dependent(
         self,
@@ -976,6 +1120,11 @@ class BodyFitter(nn.Module):
         )
         bones = j - j_parent
 
+        # Per-part vertex statistics, shared machinery with _fit_global_rotations. The
+        # sequential loop below only needs 3x3 algebra per joint: the cross-covariance
+        # about the dynamic centers follows algebraically from these fixed sums.
+        raw, s_t, s_a, s_w = self._part_sums(target_vertices, reference_vertices, vertex_weights)
+
         glob_positions: list[torch.Tensor] = []
 
         for i in range(self.body_model.num_joints):
@@ -995,42 +1144,30 @@ class BodyFitter(nn.Module):
                 elif i == 11:
                     glob_rots.append(glob_rots[8])
                     continue
-                elif i not in [1, 2, 4, 5, 7, 8, 16, 17, 18, 19]:
-                    glob_rots.append(glob_rots_prev[:, i])
-                    continue
+            if i not in self.adjustable_parts:
+                glob_rots.append(glob_rots_prev[:, i])
+                continue
 
-            vertex_selector = self.part_vertex_selectors[i]
+            # Vertex contribution: centered cross-covariance about the dynamic centers
+            # (c_t = current global joint position, c_a = reference joint position).
+            c_t = glob_position  # (B, 3)
+            c_a = true_reference_joints[:, i]  # (B_ref, 3)
+            A_vert = (
+                raw[:, i]
+                - s_t[:, i].unsqueeze(-1) * c_a.unsqueeze(-2)
+                - c_t.unsqueeze(-1) * s_a[:, i].unsqueeze(-2)
+                + s_w[:, i].unsqueeze(-1) * (c_t.unsqueeze(-1) * c_a.unsqueeze(-2))
+            )  # (B, 3, 3)
+
+            # Joint contribution (children_and_self), same weighting as before.
             joint_selector = self.children_and_self[i]
+            estim_joints = target_joints[:, joint_selector] - c_t.unsqueeze(1)
+            default_joints = reference_joints[:, joint_selector] - c_a.unsqueeze(1)
+            if joint_weights is not None:
+                default_joints = default_joints * joint_weights[:, joint_selector].unsqueeze(-1)
+            A_joint = estim_joints.mT @ default_joints  # (B, 3, 3)
 
-            default_body_part = reference_vertices[:, vertex_selector]
-            estim_body_part = target_vertices[:, vertex_selector]
-            weights_body_part = (
-                vertex_weights[:, vertex_selector].unsqueeze(-1)
-                if vertex_weights is not None
-                else torch.tensor(1.0, dtype=torch.float32, device=device)
-            )
-
-            default_joints = reference_joints[:, joint_selector]
-            estim_joints = target_joints[:, joint_selector]
-            weights_joints = (
-                joint_weights[:, joint_selector].unsqueeze(-1)
-                if joint_weights is not None
-                else torch.tensor(1.0, dtype=torch.float32, device=device)
-            )
-
-            reference_point = glob_position.unsqueeze(1)
-            default_reference_point = true_reference_joints[:, i : i + 1]
-            default_points = torch.cat(
-                [
-                    (default_body_part - default_reference_point) * weights_body_part,
-                    (default_joints - default_reference_point) * weights_joints,
-                ],
-                dim=1,
-            )
-            estim_points = torch.cat(
-                [(estim_body_part - reference_point), (estim_joints - reference_point)], dim=1
-            )
-            glob_rot = kabsch(estim_points, default_points) @ glob_rots_prev[:, i]
+            glob_rot = proj_SO3(A_vert + A_joint) @ glob_rots_prev[:, i]
             glob_rots.append(glob_rot)
 
         return torch.stack(glob_rots, dim=1)

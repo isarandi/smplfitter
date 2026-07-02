@@ -2,13 +2,64 @@ from __future__ import annotations
 import tensorflow as tf
 
 
-def kabsch(X, Y):
-    A = tf.matmul(X, Y, transpose_a=True)
+def proj_SO3(A):
+    """Project (..., 3, 3) matrices onto SO(3) — closest rotation in Frobenius norm."""
     _, U, V = tf.linalg.svd(A)
     T = tf.matmul(U, V, transpose_b=True)
-    has_reflection = (tf.linalg.det(T) < 0)[..., tf.newaxis, tf.newaxis]
+    has_reflection = (_det3x3(T) < 0)[..., tf.newaxis, tf.newaxis]
     T_mirror = T - 2 * tf.matmul(U[..., -1:], V[..., -1:], transpose_b=True)
     return tf.where(has_reflection, T_mirror, T)
+
+
+def _det3x3(m):
+    """Determinant of (..., 3, 3) matrices via cofactor expansion.
+
+    Used instead of ``tf.linalg.det`` because ``MatrixDeterminant`` has no XLA CPU
+    kernel, so it breaks ``tf.function(jit_compile=True)``; the explicit 3x3 form is
+    XLA-compatible and numerically identical. It only feeds a sign comparison, so it
+    does not affect gradients.
+    """
+    return (
+        m[..., 0, 0] * (m[..., 1, 1] * m[..., 2, 2] - m[..., 1, 2] * m[..., 2, 1])
+        - m[..., 0, 1] * (m[..., 1, 0] * m[..., 2, 2] - m[..., 1, 2] * m[..., 2, 0])
+        + m[..., 0, 2] * (m[..., 1, 0] * m[..., 2, 1] - m[..., 1, 1] * m[..., 2, 0])
+    )
+
+
+def kabsch(X, Y):
+    return proj_SO3(tf.matmul(X, Y, transpose_a=True))
+
+
+def align_unit_vectors(a, b):
+    """Closed-form rotation that maps unit vector ``a`` to unit vector ``b``.
+
+    Returns (..., 3, 3). Built from Rodrigues on the axis-angle
+    ``angle * (a x b) / |a x b|`` with ``angle = atan2(|a x b|, a . b)``.
+    The parallel (a == b) and antiparallel (a == -b) limits stay finite —
+    ``tf.math.divide_no_nan`` returns a zero rotvec there, giving the identity matrix.
+    The antiparallel choice is arbitrary (no canonical 180-deg rotation).
+
+    Unlike ``tf.linalg.cross``, this helper broadcasts ``a`` and ``b`` against
+    each other (e.g. (1, 3) against (B, 3)).
+    """
+    broadcast_shape = tf.broadcast_dynamic_shape(tf.shape(a), tf.shape(b))
+    a = tf.broadcast_to(a, broadcast_shape)
+    b = tf.broadcast_to(b, broadcast_shape)
+    cross = tf.linalg.cross(a, b)
+    dot = tf.reduce_sum(a * b, axis=-1, keepdims=True)
+    sin_a = tf.linalg.norm(cross, axis=-1, keepdims=True)
+    angle = tf.math.atan2(sin_a, dot)
+    rotvec = tf.math.divide_no_nan(cross * angle, sin_a)
+    return rotvec2mat(rotvec)
+
+
+def project_onto_plane(v, n_hat):
+    """Component of ``v`` perpendicular to the unit vector ``n_hat``.
+
+    Batched over leading dims; ``n_hat`` broadcasts against ``v``.
+    """
+    parallel = tf.reduce_sum(v * n_hat, axis=-1, keepdims=True) * n_hat
+    return v - parallel
 
 
 def rotvec2mat(rotvec):

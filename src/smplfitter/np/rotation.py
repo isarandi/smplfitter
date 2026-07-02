@@ -3,13 +3,41 @@ import numpy as np
 from .util import matmul_transp_a
 
 
-def kabsch(X, Y):
-    A = matmul_transp_a(X, Y)
+def divide_no_nan(a, b):
+    """Safe division that returns zero where the denominator is zero."""
+    safe_b = np.where(b == 0, np.ones_like(b), b)
+    quotient = a / safe_b
+    return np.where(b == 0, np.zeros_like(quotient), quotient)
+
+
+def proj_SO3(A):
+    """Project (..., 3, 3) matrices onto SO(3) — closest rotation in Frobenius norm."""
     U, _, Vh = np.linalg.svd(A)
     T = U @ Vh
     has_reflection = (np.linalg.det(T) < 0)[..., np.newaxis, np.newaxis]
     T_mirror = T - 2 * U[..., -1:] @ Vh[..., -1:, :]
     return np.where(has_reflection, T_mirror, T)
+
+
+def kabsch(X, Y):
+    return proj_SO3(matmul_transp_a(X, Y))
+
+
+def align_unit_vectors(a, b):
+    """Closed-form rotation that maps unit vector ``a`` to unit vector ``b``.
+
+    Returns (..., 3, 3). Built from Rodrigues on the axis-angle
+    ``angle * (a x b) / |a x b|`` with ``angle = atan2(|a x b|, a . b)``.
+    The parallel (a == b) and antiparallel (a == -b) limits stay finite —
+    ``divide_no_nan`` returns a zero rotvec, which gives the identity matrix.
+    The antiparallel choice is arbitrary (no canonical 180-deg rotation).
+    """
+    cross = np.cross(a, b, axis=-1)
+    dot = np.sum(a * b, axis=-1, keepdims=True)
+    sin_a = np.linalg.norm(cross, axis=-1, keepdims=True)
+    angle = np.arctan2(sin_a, dot)
+    rotvec = divide_no_nan(cross * angle, sin_a)
+    return rotvec2mat(rotvec)
 
 
 def rotvec2mat(rotvec):
