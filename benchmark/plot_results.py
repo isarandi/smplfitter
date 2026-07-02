@@ -29,6 +29,12 @@ STYLE = {
     'PT script GPU': dict(color='C6', linestyle='-', marker='s'),
     'PT compile CPU': dict(color='C2', linestyle='--', marker='^'),
     'PT compile GPU': dict(color='C2', linestyle='-', marker='^'),
+    'PT eager dec CPU': dict(color='C8', linestyle='--', marker='o'),
+    'PT eager dec GPU': dict(color='C8', linestyle='-', marker='o'),
+    'PT script dec CPU': dict(color='C9', linestyle='--', marker='s'),
+    'PT script dec GPU': dict(color='C9', linestyle='-', marker='s'),
+    'PT compile dec CPU': dict(color='C7', linestyle='--', marker='^'),
+    'PT compile dec GPU': dict(color='C7', linestyle='-', marker='^'),
     'TF function CPU': dict(color='C3', linestyle='--', marker='D'),
     'TF function GPU': dict(color='C3', linestyle='-', marker='D'),
     'JAX jit CPU': dict(color='C4', linestyle='--', marker='v'),
@@ -135,6 +141,108 @@ def plot_vs_smplx():
     conn.close()
 
 
+def query_fit_metric(conn, backend, model, method, vertex_count, metric):
+    """Query a fit-benchmark column. metric is 'throughput' or 'time'."""
+    if metric == 'throughput':
+        select = 'batch_size, batch_size / (time_ms / 1000.0)'
+    elif metric == 'time':
+        select = 'batch_size, time_ms'
+    else:
+        raise ValueError(metric)
+    cursor = conn.execute(
+        f'SELECT {select} FROM fit_results WHERE backend = ? AND model = ? AND method = ? '
+        f'AND vertex_count = ? ORDER BY batch_size',
+        (backend, model, method, vertex_count),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        return [], []
+    batch_sizes, values = zip(*rows)
+    return list(batch_sizes), list(values)
+
+
+def _plot_fit(metric, ylabel, filename_stem, only_backends=None):
+    out_dir = Path(__file__).parent
+    conn = sqlite3.connect(out_dir / 'results.db')
+
+    models = [r[0] for r in conn.execute('SELECT DISTINCT model FROM fit_results')]
+    vertex_counts = [r[0] for r in conn.execute('SELECT DISTINCT vertex_count FROM fit_results')]
+    methods = ['fit', 'fit_known_shape', 'fit_known_pose']
+    backends = [r[0] for r in conn.execute('SELECT DISTINCT backend FROM fit_results')]
+    backends = [b for b in STYLE if b in backends]
+    if only_backends is not None:
+        backends = [b for b in backends if b in only_backends]
+
+    for model in models:
+        nrows = len(vertex_counts)
+        ncols = len(methods)
+        _, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows), squeeze=False)
+
+        for i, vcount in enumerate(vertex_counts):
+            for j, method in enumerate(methods):
+                ax = axes[i][j]
+                for backend in backends:
+                    batch_sizes, values = query_fit_metric(
+                        conn, backend, model, method, vcount, metric
+                    )
+                    if batch_sizes:
+                        ax.plot(
+                            batch_sizes,
+                            values,
+                            **STYLE[backend],
+                            label=backend,
+                            linewidth=2,
+                            markersize=8,
+                        )
+                ax.set_xlabel('Batch Size')
+                ax.set_ylabel(ylabel)
+                ax.set_title(f'{method} — verts={vcount} ({model.upper()})')
+                ax.set_xscale('log')
+                ax.set_yscale('log')
+                ax.legend(fontsize=7)
+                ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        filename = (
+            f'{filename_stem}_{model}.png' if len(models) > 1 else f'{filename_stem}.png'
+        )
+        plt.savefig(out_dir / filename, dpi=150)
+        print(f'Saved {out_dir / filename}')
+
+    conn.close()
+
+
+def plot_fit_results():
+    _plot_fit('throughput', 'Throughput (items/sec)', 'benchmark_fit')
+
+
+def plot_fit_time():
+    _plot_fit('time', 'Batch time (ms)', 'benchmark_fit_time')
+
+
+def plot_fit_compile_vs_numba():
+    only = ['PT compile CPU', 'Numba']
+    _plot_fit('throughput', 'Throughput (items/sec)', 'benchmark_fit_compile_vs_numba', only)
+    _plot_fit('time', 'Batch time (ms)', 'benchmark_fit_compile_vs_numba_time', only)
+
+
+def plot_fit_decoupled_vs_regular():
+    only = [
+        'PT eager CPU', 'PT eager dec CPU',
+        'PT eager GPU', 'PT eager dec GPU',
+        'PT script CPU', 'PT script dec CPU',
+        'PT script GPU', 'PT script dec GPU',
+        'PT compile CPU', 'PT compile dec CPU',
+        'PT compile GPU', 'PT compile dec GPU',
+    ]
+    _plot_fit('throughput', 'Throughput (items/sec)', 'benchmark_fit_decoupled_vs_regular', only)
+    _plot_fit('time', 'Batch time (ms)', 'benchmark_fit_decoupled_vs_regular_time', only)
+
+
 if __name__ == '__main__':
     plot_results()
     plot_vs_smplx()
+    plot_fit_results()
+    plot_fit_time()
+    plot_fit_compile_vs_numba()
+    plot_fit_decoupled_vs_regular()
