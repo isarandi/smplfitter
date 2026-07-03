@@ -9,7 +9,7 @@ import torch
 tf = pytest.importorskip('tensorflow')
 smpl_tf = pytest.importorskip('smplfitter.tf')
 
-import smplfitter.np as smpl_np  # NumPy is always available; used to generate targets.
+import smplfitter.np as smpl_np  # noqa: E402  (import must follow importorskip)
 
 
 def _make_targets(model_name: str, batch_size: int, seed: int = 0):

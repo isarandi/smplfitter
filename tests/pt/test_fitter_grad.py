@@ -6,7 +6,6 @@ make backprop through the fit produce None / NaN / Inf gradients.
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 import torch
 

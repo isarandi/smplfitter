@@ -203,9 +203,7 @@ def _plot_fit(metric, ylabel, filename_stem, only_backends=None):
                 ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        filename = (
-            f'{filename_stem}_{model}.png' if len(models) > 1 else f'{filename_stem}.png'
-        )
+        filename = f'{filename_stem}_{model}.png' if len(models) > 1 else f'{filename_stem}.png'
         plt.savefig(out_dir / filename, dpi=150)
         print(f'Saved {out_dir / filename}')
 
@@ -228,12 +226,18 @@ def plot_fit_compile_vs_numba():
 
 def plot_fit_decoupled_vs_regular():
     only = [
-        'PT eager CPU', 'PT eager dec CPU',
-        'PT eager GPU', 'PT eager dec GPU',
-        'PT script CPU', 'PT script dec CPU',
-        'PT script GPU', 'PT script dec GPU',
-        'PT compile CPU', 'PT compile dec CPU',
-        'PT compile GPU', 'PT compile dec GPU',
+        'PT eager CPU',
+        'PT eager dec CPU',
+        'PT eager GPU',
+        'PT eager dec GPU',
+        'PT script CPU',
+        'PT script dec CPU',
+        'PT script GPU',
+        'PT script dec GPU',
+        'PT compile CPU',
+        'PT compile dec CPU',
+        'PT compile GPU',
+        'PT compile dec GPU',
     ]
     _plot_fit('throughput', 'Throughput (items/sec)', 'benchmark_fit_decoupled_vs_regular', only)
     _plot_fit('time', 'Batch time (ms)', 'benchmark_fit_decoupled_vs_regular_time', only)
