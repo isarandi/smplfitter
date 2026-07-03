@@ -155,11 +155,89 @@ class BodyFitter(nn.Module):
             inverse_perm[11] = inverse_perm[8]
         self.assemble_indices = nn.Buffer(torch.tensor(inverse_perm, dtype=torch.int64))
 
+        # Index buffers for all part/joint gathers: indexing CUDA tensors with Python
+        # lists would materialize the index tensor on CPU and copy it over at every call,
+        # which also blocks CUDA graph capture. index_select on these buffers is free.
+        self.leaf_part_indices = nn.Buffer(torch.tensor(leaf_parts, dtype=torch.int64))
+        self.bone_part_indices = nn.Buffer(torch.tensor(bone_parts, dtype=torch.int64))
+        self.root_index = nn.Buffer(torch.tensor([0], dtype=torch.int64))
+        self.toe_part_indices = nn.Buffer(torch.tensor([10, 11], dtype=torch.int64))
+        self.foot_part_indices = nn.Buffer(torch.tensor([7, 8], dtype=torch.int64))
+
+        # Per-part joint indices (children_and_self), flattened with start offsets, for
+        # the sequential final-adjust pass.
+        cas_starts = [0]
+        for i in range(J):
+            cas_starts.append(cas_starts[-1] + len(self.children_and_self[i]))
+        self.cas_starts = cas_starts
+        self.cas_flat = nn.Buffer(
+            torch.tensor([j for js in self.children_and_self for j in js], dtype=torch.int64)
+        )
+
+        # --- Kinematic-tree levels (root = level 0) for level-batched forward kinematics ---
+        # The sequential per-joint FK loop is reformulated as one batched update per tree
+        # level (8 levels for SMPL): joints of a level are independent given their parents,
+        # which are final by then. Bit-exact reformulation of the per-joint loop.
+        parents = body_model.kintree_parents
+        depth = [0] * J
+        for i in range(1, J):
+            depth[i] = depth[parents[i]] + 1
+        levels = [[i for i in range(J) if depth[i] == d] for d in range(1, max(depth) + 1)]
+        self.num_fk_levels = len(levels)
+        self.fk_level_sizes = [len(js) for js in levels]
+        fk_js = [i for js in levels for i in js]
+        self.fk_js = nn.Buffer(torch.tensor(fk_js, dtype=torch.int64))
+        self.fk_ps = nn.Buffer(torch.tensor([parents[i] for i in fk_js], dtype=torch.int64))
+        parents_with_root = [0] + list(parents[1:])
+        self.bone_ext = nn.Buffer(self.J_template_ext - self.J_template_ext[parents_with_root])
+
+        # --- Shape-Jacobian precompute for the split-Gramian solve in _fit_shape ---
+        # jac_shapedirs[(j, c), (l, s)] = weights[l, j] * shapedirs[l, c, s]: one GEMM of
+        # the flattened global rotations against this matrix yields the rotated shape
+        # Jacobian directly in coordinate-major (B, 3, V, S) layout, avoiding einsum's
+        # pathological contraction paths. Only precomputed when reasonably small (it
+        # scales with num_betas); the kid blendshape needs the general solve anyway.
+        V = body_model.num_vertices
+        S = self.n_betas
+        self.gram_supported = not enable_kid and J * 3 * V * S <= 2**26
+        if self.gram_supported:
+            jac_shapedirs = torch.einsum(
+                'lj,lcs->jcls', body_model.weights, body_model.shapedirs
+            ).reshape(J * 3, V * S)
+        else:
+            jac_shapedirs = torch.zeros(0)
+        self.jac_shapedirs = nn.Buffer(jac_shapedirs)
+
+        # --- Level-batched final-adjust precompute ---
+        # The adjustable parts of SMPL-family models sit in tree levels of two independent
+        # parts each (hips, knees, ankles, shoulders, elbows), so the final adjustment can
+        # run level by level: batched FK position updates interleaved (in tree order) with
+        # per-level part statistics and one batched proj_SO3 per level. This requires all
+        # adjustable parts to contain the same number of joints so the joint statistics
+        # form a fixed-width gather; models where that fails (e.g. MANO/FLAME, where every
+        # part is adjustable) use the sequential per-joint pass instead.
+        adjustable_set = set(self.adjustable_parts)
+        joint_counts = {len(self.children_and_self[i]) for i in adjustable_set}
+        self.leveladj_supported = self.is_smpl_family and len(joint_counts) == 1
+        adj_levels = [[i for i in js if i in adjustable_set] for js in levels]
+        self.adj_level_sizes = [len(a) for a in adj_levels]
+        self.adj_last_level = max((k for k, a in enumerate(adj_levels) if len(a) > 0), default=-1)
+        adj_flat = [i for a in adj_levels for i in a]
+        self.adj_parts = nn.Buffer(torch.tensor(adj_flat, dtype=torch.int64))
+        if self.leveladj_supported:
+            self.adj_n_joints = joint_counts.pop()
+            adj_joints = [j for i in adj_flat for j in self.children_and_self[i]]
+        else:
+            self.adj_n_joints = 0
+            adj_joints = []
+        self.adj_part_joints = nn.Buffer(torch.tensor(adj_joints, dtype=torch.int64))
+
     def _part_sums(
         self,
         target_vertices: torch.Tensor,
         reference_vertices: torch.Tensor,
         vertex_weights: Optional[torch.Tensor],
+        share_beta: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Per-part sufficient statistics for cross-covariances, computed loop-free.
 
@@ -168,6 +246,13 @@ class BodyFitter(nn.Module):
         ``s_a = sum w a`` (B_ref, J, 3), ``s_w = sum w`` (B or 1, J, 1).
         The centered cross-covariance about any centers (c_t, c_a) then follows as
         ``raw - s_t c_a^T - c_t s_a^T + s_w c_t c_a^T``.
+
+        The ``s_t``/``s_a`` sums normally run as single flat GEMMs (batch folded into the
+        columns), since batched (B, J, N) @ (B, N, 3) products underutilize the GPU at
+        these shapes. Shared-beta fits keep the batched form instead: they must reproduce
+        the reference reduction order exactly, because the shared-shape pipeline
+        chaotically amplifies float-level reduction noise (to ~2e-3 in pose_rotvecs at
+        the ankle parts).
         """
         t = target_vertices[:, self.used_vertex_indices]
         a = reference_vertices[:, self.used_vertex_indices]
@@ -180,10 +265,18 @@ class BodyFitter(nn.Module):
             t_sum_side = t
             s_w = self.part_counts
         B = t.shape[0] if t.shape[0] >= a.shape[0] else a.shape[0]
-        outer = (t.unsqueeze(-1) * a.unsqueeze(-2)).reshape(B, t.shape[1], 9)
+        N = t.shape[1]
+        outer = (t.unsqueeze(-1) * a.unsqueeze(-2)).reshape(B, N, 9)
         raw = (self.part_matrix @ outer).view(B, -1, 3, 3)
-        s_t = self.part_matrix @ t_sum_side
-        s_a = self.part_matrix @ a
+        if share_beta:
+            s_t = self.part_matrix @ t_sum_side
+            s_a = self.part_matrix @ a
+        else:
+            J = self.part_matrix.shape[0]
+            t_flat = t_sum_side.permute(1, 0, 2).reshape(N, -1)  # (N, B*3)
+            a_flat = a.permute(1, 0, 2).reshape(N, -1)  # (N, B_ref*3)
+            s_t = (self.part_matrix @ t_flat).view(J, -1, 3).permute(1, 0, 2).contiguous()
+            s_a = (self.part_matrix @ a_flat).view(J, -1, 3).permute(1, 0, 2).contiguous()
         return raw, s_t, s_a, s_w
 
     @torch.jit.export
@@ -283,6 +376,7 @@ class BodyFitter(nn.Module):
                     initial_joints,
                     vertex_weights,
                     joint_weights,
+                    share_beta,
                 )
                 @ initial_forw['orientations']
             )
@@ -296,6 +390,7 @@ class BodyFitter(nn.Module):
                 initial_joints,
                 vertex_weights,
                 joint_weights,
+                share_beta,
             )
 
         device = self.body_model.v_template.device
@@ -332,6 +427,7 @@ class BodyFitter(nn.Module):
                     ref_joints,
                     vertex_weights,
                     joint_weights,
+                    share_beta,
                 )
                 @ glob_rotmats
             )
@@ -380,6 +476,7 @@ class BodyFitter(nn.Module):
                     None,
                     ref_trans,
                     ref_kid_factor,
+                    share_beta,
                 )
             elif scale_fit:
                 assert ref_scale_corr is not None
@@ -395,6 +492,7 @@ class BodyFitter(nn.Module):
                     ref_scale_corr,
                     ref_trans,
                     ref_kid_factor,
+                    share_beta,
                 )
             else:
                 glob_rotmats = self._fit_global_rotations_dependent(
@@ -409,6 +507,7 @@ class BodyFitter(nn.Module):
                     None,
                     ref_trans,
                     ref_kid_factor,
+                    share_beta,
                 )
 
         # Add the mean back (scaled appropriately if using scale correction)
@@ -776,17 +875,37 @@ class BodyFitter(nn.Module):
         )
         rel_rotmats = torch.matmul(parent_glob_rot_mats.transpose(-1, -2), glob_rotmats)
 
-        glob_positions_ext_list = [self.J_template_ext[None, 0].expand(batch_size, -1, -1)]
-        for i_joint, i_parent in enumerate(self.body_model.kintree_parents[1:], start=1):
-            glob_positions_ext_list.append(
-                glob_positions_ext_list[i_parent]
+        # Forward kinematics of the shape-dependent joint positions (position and its
+        # Jacobian w.r.t. the betas), one batched update per kinematic-tree level.
+        n_ext = self.J_template_ext.shape[2]
+        glob_positions_ext = torch.empty(
+            batch_size,
+            self.body_model.num_joints,
+            3,
+            n_ext,
+            device=device,
+            dtype=self.J_template_ext.dtype,
+        )
+        glob_positions_ext.index_copy_(
+            1, self.root_index, self.J_template_ext[:1].expand(batch_size, 1, 3, n_ext)
+        )
+        level_start = 0
+        for k in range(self.num_fk_levels):
+            level_size = self.fk_level_sizes[k]
+            js = self.fk_js.narrow(0, level_start, level_size)
+            ps = self.fk_ps.narrow(0, level_start, level_size)
+            level_start += level_size
+            glob_positions_ext.index_copy_(
+                1,
+                js,
+                glob_positions_ext.index_select(1, ps)
                 + torch.einsum(
-                    'bCc,cs->bCs',
-                    glob_rotmats[:, i_parent],
-                    self.J_template_ext[i_joint] - self.J_template_ext[i_parent],
-                )
+                    'bnCc,ncs->bnCs',
+                    glob_rotmats.index_select(1, ps),
+                    self.bone_ext.index_select(0, js),
+                ),
             )
-        glob_positions_ext = torch.stack(glob_positions_ext_list, dim=1)
+
         translations_ext = glob_positions_ext - torch.einsum(
             'bjCc,jcs->bjCs', glob_rotmats, self.J_template_ext
         )
@@ -795,6 +914,224 @@ class BodyFitter(nn.Module):
         v_posed = self.body_model.v_template + torch.einsum(
             'vcp,bp->bvc', self.body_model.posedirs, rot_params
         )
+
+        # The shape solve has two implementations. The split-Gramian solve handles the
+        # common case; the general solve covers the extra scale and kid unknowns, models
+        # whose Jacobian precompute would be too large (see __init__), and share_beta,
+        # which must keep the reference summation order exactly (see _part_sums).
+        if self.gram_supported and not (share_beta or scale_target or scale_fit):
+            return self._fit_shape_gram(
+                glob_rotmats,
+                glob_positions_ext,
+                translations_ext,
+                rel_rotmats,
+                v_posed,
+                target_vertices,
+                target_joints,
+                vertex_weights,
+                joint_weights,
+                beta_regularizer,
+                beta_regularizer2,
+                beta_regularizer_reference,
+                requested_keys,
+            )
+        return self._fit_shape_general(
+            glob_rotmats,
+            glob_positions_ext,
+            translations_ext,
+            rel_rotmats,
+            v_posed,
+            target_vertices,
+            target_joints,
+            vertex_weights,
+            joint_weights,
+            beta_regularizer,
+            beta_regularizer2,
+            scale_regularizer,
+            kid_regularizer,
+            share_beta,
+            scale_target,
+            scale_fit,
+            beta_regularizer_reference,
+            kid_regularizer_reference,
+            requested_keys,
+        )
+
+    def _fit_shape_gram(
+        self,
+        glob_rotmats: torch.Tensor,
+        glob_positions_ext: torch.Tensor,
+        translations_ext: torch.Tensor,
+        rel_rotmats: torch.Tensor,
+        v_posed: torch.Tensor,
+        target_vertices: torch.Tensor,
+        target_joints: Optional[torch.Tensor],
+        vertex_weights: Optional[torch.Tensor],
+        joint_weights: Optional[torch.Tensor],
+        beta_regularizer: float,
+        beta_regularizer2: float,
+        beta_regularizer_reference: Optional[torch.Tensor],
+        requested_keys: list[str],
+    ) -> dict[str, torch.Tensor]:
+        """Shape and translation solve via per-block normal equations (Gramians).
+
+        The vertex and joint blocks of the least-squares system are never concatenated;
+        their normal equations are accumulated separately and added:
+        ``G = Av^T Wv Av + Aj^T Wj Aj`` and ``r = Av^T Wv bv + Aj^T Wj bj``. The
+        per-coordinate weighted-mean centering of the general solve is reproduced
+        algebraically through the covariance identity (``mu_A = SA / W``,
+        ``mu_b = Sb / W``): ``G_cen = G - SA^T SA / W`` and ``r_cen = r - SA^T Sb / W``,
+        where ``SA = sum_n w_n A_n`` and ``Sb = sum_n w_n b_n``. The large GEMMs run in
+        float32; the small (B, S, S) combination, centering and solve run in float64 to
+        absorb the cancellation in this identity. The translation then follows exactly as
+        in the general solve: ``trans = mean_b - mean_A @ x``.
+
+        The vertex block is built in coordinate-major (B, 3, V, S) layout: the rotated
+        shape Jacobian is one GEMM against the precomputed ``jac_shapedirs`` matrix, and
+        the LBS rotation is an explicit blended-rotation multiply-reduce, avoiding
+        einsum's pathological contraction paths on these shapes.
+        """
+        batch_size = target_vertices.shape[0]
+        num_vertices = self.body_model.num_vertices
+        n_betas = self.n_betas
+        device = self.body_model.v_template.device
+
+        # Blended per-vertex rotations and the position part of the LBS.
+        rot_blend = torch.matmul(
+            self.body_model.weights, glob_rotmats.reshape(batch_size, -1, 9)
+        ).view(batch_size, num_vertices, 3, 3)
+        pos_vmajor = (rot_blend * v_posed.unsqueeze(-2)).sum(-1)  # (B, V, 3)
+
+        # Shape Jacobian via one GEMM:
+        # jac[b, C, l, s] = sum_{j, c} rot[b, j, C, c] weights[l, j] shapedirs[l, c, s]
+        rot_rows = glob_rotmats.permute(0, 2, 1, 3).reshape(batch_size * 3, -1)
+        jac = torch.mm(rot_rows, self.jac_shapedirs).view(batch_size, 3, num_vertices, n_betas)
+
+        # Skinned translation offsets for both the position and the Jacobian.
+        trans_offsets = torch.matmul(
+            self.body_model.weights, translations_ext.permute(0, 2, 1, 3)
+        )  # (B, 3, V, S+1)
+        jac += trans_offsets[..., 1:]
+        pos = pos_vmajor.permute(0, 2, 1) + trans_offsets[..., 0]  # (B, 3, V)
+        b = target_vertices.mT - pos  # (B, 3, V)
+
+        # Weights only take effect if both vertex and joint weights are given (when
+        # joints are used), or if vertex weights are given without joints.
+        if target_joints is not None and vertex_weights is not None and joint_weights is not None:
+            vw: Optional[torch.Tensor] = vertex_weights
+            jw: Optional[torch.Tensor] = joint_weights
+        elif target_joints is None and vertex_weights is not None:
+            vw = vertex_weights
+            jw = None
+        else:
+            vw = None
+            jw = None
+
+        # Vertex-block normal equations (rows = (coordinate, vertex); order irrelevant).
+        jac_flat = jac.reshape(batch_size, 3 * num_vertices, n_betas)
+        b_flat = b.reshape(batch_size, 3 * num_vertices, 1)
+        if vw is None:
+            gram = (jac_flat.mT @ jac_flat).double()
+            rhs = (jac_flat.mT @ b_flat).double()
+            sum_A = jac.sum(dim=2).double()  # (B, 3, S)
+            sum_b = b.sum(dim=2).unsqueeze(-1).double()  # (B, 3, 1)
+            w_sum = torch.full(
+                (batch_size, 1, 1), float(num_vertices), device=device, dtype=torch.float64
+            )
+        else:
+            wjac = jac * vw[:, None, :, None]
+            wjac_flat = wjac.reshape(batch_size, 3 * num_vertices, n_betas)
+            gram = (wjac_flat.mT @ jac_flat).double()
+            rhs = (wjac_flat.mT @ b_flat).double()
+            sum_A = wjac.sum(dim=2).double()
+            sum_b = (b * vw[:, None, :]).sum(dim=2).unsqueeze(-1).double()
+            w_sum = vw.sum(dim=1).view(batch_size, 1, 1).double()
+
+        if target_joints is not None:
+            gram_j, rhs_j, sum_A_j, sum_b_j, w_sum_j = _gram_block(
+                glob_positions_ext[..., 1:], target_joints - glob_positions_ext[..., 0], jw
+            )
+            gram = gram + gram_j
+            rhs = rhs + rhs_j
+            sum_A = sum_A + sum_A_j
+            sum_b = sum_b + sum_b_j
+            w_sum = w_sum + w_sum_j
+
+        w_sum_safe = torch.where(w_sum == 0, torch.ones_like(w_sum), w_sum)
+        gram_cen = gram - sum_A.mT @ sum_A / w_sum_safe
+        rhs_cen = rhs - sum_A.mT @ sum_b / w_sum_safe
+
+        l2_regularizer_all = torch.cat(
+            [
+                torch.full((2,), float(beta_regularizer2), dtype=torch.float64, device=device),
+                torch.full(
+                    (n_betas - 2,), float(beta_regularizer), dtype=torch.float64, device=device
+                ),
+            ]
+        )
+        if beta_regularizer_reference is None:
+            l2_reference = torch.zeros(batch_size, n_betas, dtype=torch.float64, device=device)
+        else:
+            l2_reference = beta_regularizer_reference.double()
+            n_given = l2_reference.shape[1]
+            if n_given < n_betas:
+                l2_reference = torch.nn.functional.pad(l2_reference, [0, n_betas - n_given])
+            else:
+                l2_reference = l2_reference[:, :n_betas]
+        l2_regularizer_rhs = (l2_regularizer_all * l2_reference).unsqueeze(-1)
+
+        chol, _ = torch.linalg.cholesky_ex(gram_cen + torch.diag(l2_regularizer_all))
+        x = torch.cholesky_solve(rhs_cen + l2_regularizer_rhs, chol)
+
+        mean_A = sum_A / w_sum_safe  # (B, 3, S)
+        mean_b = sum_b / w_sum_safe  # (B, 3, 1)
+        new_trans = (mean_b - mean_A @ x).squeeze(-1).float()
+        new_shape = x.squeeze(-1).float()
+
+        result = dict(shape_betas=new_shape, trans=new_trans, relative_orientations=rel_rotmats)
+
+        if 'joints' in requested_keys:
+            result['joints'] = (
+                glob_positions_ext[..., 0]
+                + torch.einsum('bvcs,bs->bvc', glob_positions_ext[..., 1:], new_shape)
+                + new_trans.unsqueeze(1)
+            )
+        if 'vertices' in requested_keys:
+            verts = pos + (jac_flat @ new_shape.unsqueeze(-1)).view(batch_size, 3, num_vertices)
+            result['vertices'] = (verts + new_trans.unsqueeze(-1)).mT.contiguous()
+        return result
+
+    def _fit_shape_general(
+        self,
+        glob_rotmats: torch.Tensor,
+        glob_positions_ext: torch.Tensor,
+        translations_ext: torch.Tensor,
+        rel_rotmats: torch.Tensor,
+        v_posed: torch.Tensor,
+        target_vertices: torch.Tensor,
+        target_joints: Optional[torch.Tensor],
+        vertex_weights: Optional[torch.Tensor],
+        joint_weights: Optional[torch.Tensor],
+        beta_regularizer: float,
+        beta_regularizer2: float,
+        scale_regularizer: float,
+        kid_regularizer: Optional[float],
+        share_beta: bool,
+        scale_target: bool,
+        scale_fit: bool,
+        beta_regularizer_reference: Optional[torch.Tensor],
+        kid_regularizer_reference: Optional[torch.Tensor],
+        requested_keys: list[str],
+    ) -> dict[str, torch.Tensor]:
+        """Shape and translation solve over the concatenated vertex and joint residuals.
+
+        Handles all unknowns beyond the betas (kid factor, scale correction) and the
+        share_beta coupling across the batch, at the cost of materializing the full
+        stacked design matrix.
+        """
+        batch_size = target_vertices.shape[0]
+        device = self.body_model.v_template.device
+
         v_rotated = torch.einsum(
             'bjCc,vj,bvc->bvC', glob_rotmats, self.body_model.weights, v_posed
         )
@@ -989,6 +1326,7 @@ class BodyFitter(nn.Module):
         reference_joints: Optional[torch.Tensor],
         vertex_weights: Optional[torch.Tensor],
         joint_weights: Optional[torch.Tensor],
+        share_beta: bool = False,
     ) -> torch.Tensor:
         """Global orientation of each body part via swing-twist decomposition, batched.
 
@@ -1008,7 +1346,9 @@ class BodyFitter(nn.Module):
         B = target_vertices.shape[0]
 
         # Per-part vertex cross-covariances about the children-mean centers, loop-free.
-        raw, s_t, s_a, s_w = self._part_sums(target_vertices, reference_vertices, vertex_weights)
+        raw, s_t, s_a, s_w = self._part_sums(
+            target_vertices, reference_vertices, vertex_weights, share_beta
+        )
         mt = self.center_matrix @ target_joints  # (B, J, 3)
         ma = self.center_matrix @ reference_joints  # (B_ref, J, 3)
         A_vert = (
@@ -1042,9 +1382,9 @@ class BodyFitter(nn.Module):
             + s_wj.unsqueeze(-1) * (mtj.unsqueeze(-1) * maj.unsqueeze(-2))
         )
 
-        # Kabsch bucket (multi-joint parts + leaf parts): one batched SVD.
-        A_svd = torch.cat([A_multi, A_vert[:, self.leaf_parts]], dim=1)
-        R_svd = proj_SO3(A_svd)
+        # Kabsch bucket (multi-joint parts + leaf parts): one batched projection.
+        A_kabsch = torch.cat([A_multi, A_vert.index_select(1, self.leaf_part_indices)], dim=1)
+        R_kabsch = proj_SO3(A_kabsch)
 
         # Bone bucket: batched swing (bone alignment) + twist (from vertices).
         b_ref = (
@@ -1055,7 +1395,7 @@ class BodyFitter(nn.Module):
         b_tgt_n = divide_no_nan(b_tgt, torch.linalg.norm(b_tgt, dim=-1, keepdim=True))
         R_swing = align_unit_vectors(b_ref_n, b_tgt_n)  # (B, n_bones, 3, 3)
 
-        H = R_swing @ A_vert[:, self.bone_parts].mT
+        H = R_swing @ A_vert.index_select(1, self.bone_part_indices).mT
         trH = H.diagonal(dim1=-2, dim2=-1).sum(-1)
         bHb = (b_tgt_n.unsqueeze(-2) @ H @ b_tgt_n.unsqueeze(-1)).squeeze(-1).squeeze(-1)
         # vee_i = eps_ijk H_jk: the vertex cross-product sums, extracted from H.
@@ -1072,8 +1412,8 @@ class BodyFitter(nn.Module):
         R_bone = R_twist @ R_swing
 
         # Scatter both buckets back to per-part order (toe parts take the feet slots).
-        R_concat = torch.cat([R_svd, R_bone], dim=1)
-        return R_concat[:, self.assemble_indices]
+        R_concat = torch.cat([R_kabsch, R_bone], dim=1)
+        return R_concat.index_select(1, self.assemble_indices)
 
     def _fit_global_rotations_dependent(
         self,
@@ -1088,9 +1428,8 @@ class BodyFitter(nn.Module):
         scale_corr: Optional[torch.Tensor],
         trans: torch.Tensor,
         kid_factor: Optional[torch.Tensor],
+        share_beta: bool = False,
     ) -> torch.Tensor:
-        glob_rots: list[torch.Tensor] = []
-
         true_reference_joints = reference_joints
         if target_joints is None or reference_joints is None:
             target_joints = self.body_model.J_regressor_post_lbs @ target_vertices
@@ -1121,10 +1460,91 @@ class BodyFitter(nn.Module):
         bones = j - j_parent
 
         # Per-part vertex statistics, shared machinery with _fit_global_rotations. The
-        # sequential loop below only needs 3x3 algebra per joint: the cross-covariance
-        # about the dynamic centers follows algebraically from these fixed sums.
-        raw, s_t, s_a, s_w = self._part_sums(target_vertices, reference_vertices, vertex_weights)
+        # loops below only need 3x3 algebra per part: the cross-covariance about the
+        # dynamic centers follows algebraically from these fixed sums.
+        raw, s_t, s_a, s_w = self._part_sums(
+            target_vertices, reference_vertices, vertex_weights, share_beta
+        )
 
+        batch_size = target_vertices.shape[0]
+
+        if self.leveladj_supported:
+            # Level-batched adjustment: FK position updates run one kinematic-tree level
+            # at a time, interleaved (in tree order) with the orientation refinement of
+            # the adjustable parts on that level, so each level needs only one batched
+            # proj_SO3 instead of one per part. Non-adjustable parts keep their previous
+            # orientation.
+            rots = glob_rots_prev.clone()
+            positions = torch.empty(
+                batch_size, self.body_model.num_joints, 3, device=device, dtype=j.dtype
+            )
+            positions.index_copy_(1, self.root_index, j[:, :1] + trans.unsqueeze(1))
+
+            level_start = 0
+            adj_start = 0
+            for k in range(self.adj_last_level + 1):
+                level_size = self.fk_level_sizes[k]
+                js = self.fk_js.narrow(0, level_start, level_size)
+                ps = self.fk_ps.narrow(0, level_start, level_size)
+                level_start += level_size
+                # FK for this level: parents (previous levels) are final by now.
+                positions.index_copy_(
+                    1,
+                    js,
+                    positions.index_select(1, ps)
+                    + (rots.index_select(1, ps) @ bones.index_select(1, js).unsqueeze(-1)).squeeze(
+                        -1
+                    ),
+                )
+
+                n_adj = self.adj_level_sizes[k]
+                cp_start = adj_start * self.adj_n_joints
+                adj_start += n_adj
+                if n_adj == 0:
+                    continue
+                adj = self.adj_parts.narrow(0, adj_start - n_adj, n_adj)
+                cp = self.adj_part_joints.narrow(0, cp_start, n_adj * self.adj_n_joints)
+
+                # Vertex contribution: centered cross-covariance about the dynamic
+                # centers (c_t = current global joint position, c_a = reference one).
+                c_t = positions.index_select(1, adj)  # (B, n, 3)
+                c_a = true_reference_joints.index_select(1, adj)  # (B_ref, n, 3)
+                A_vert = (
+                    raw.index_select(1, adj)
+                    - s_t.index_select(1, adj).unsqueeze(-1) * c_a.unsqueeze(-2)
+                    - c_t.unsqueeze(-1) * s_a.index_select(1, adj).unsqueeze(-2)
+                    + s_w.index_select(1, adj).unsqueeze(-1)
+                    * (c_t.unsqueeze(-1) * c_a.unsqueeze(-2))
+                )  # (B, n, 3, 3)
+
+                # Joint contribution (children_and_self), same weighting as before.
+                estim_joints = target_joints.index_select(1, cp).view(
+                    batch_size, n_adj, self.adj_n_joints, 3
+                ) - c_t.unsqueeze(-2)
+                default_joints = reference_joints.index_select(1, cp).view(
+                    -1, n_adj, self.adj_n_joints, 3
+                ) - c_a.unsqueeze(-2)
+                if joint_weights is not None:
+                    default_joints = default_joints * joint_weights.index_select(1, cp).view(
+                        -1, n_adj, self.adj_n_joints
+                    ).unsqueeze(-1)
+                A_joint = estim_joints.mT @ default_joints  # (B, n, 3, 3)
+
+                rots.index_copy_(
+                    1,
+                    adj,
+                    proj_SO3(A_vert + A_joint) @ glob_rots_prev.index_select(1, adj),
+                )
+
+            if self.is_smpl_family:
+                # Toe parts copy the feet.
+                rots.index_copy_(
+                    1, self.toe_part_indices, rots.index_select(1, self.foot_part_indices)
+                )
+            return rots
+
+        # Sequential fallback: parts are refined one at a time in tree order.
+        glob_rots: list[torch.Tensor] = []
         glob_positions: list[torch.Tensor] = []
 
         for i in range(self.body_model.num_joints):
@@ -1160,17 +1580,49 @@ class BodyFitter(nn.Module):
             )  # (B, 3, 3)
 
             # Joint contribution (children_and_self), same weighting as before.
-            joint_selector = self.children_and_self[i]
-            estim_joints = target_joints[:, joint_selector] - c_t.unsqueeze(1)
-            default_joints = reference_joints[:, joint_selector] - c_a.unsqueeze(1)
+            joint_selector = self.cas_flat[self.cas_starts[i] : self.cas_starts[i + 1]]
+            estim_joints = target_joints.index_select(1, joint_selector) - c_t.unsqueeze(1)
+            default_joints = reference_joints.index_select(1, joint_selector) - c_a.unsqueeze(1)
             if joint_weights is not None:
-                default_joints = default_joints * joint_weights[:, joint_selector].unsqueeze(-1)
+                default_joints = default_joints * joint_weights.index_select(
+                    1, joint_selector
+                ).unsqueeze(-1)
             A_joint = estim_joints.mT @ default_joints  # (B, 3, 3)
 
             glob_rot = proj_SO3(A_vert + A_joint) @ glob_rots_prev[:, i]
             glob_rots.append(glob_rot)
 
         return torch.stack(glob_rots, dim=1)
+
+
+def _gram_block(
+    jac: torch.Tensor, b: torch.Tensor, w: Optional[torch.Tensor]
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Raw (uncentered) normal-equation pieces of one point block, in float64.
+
+    ``jac``: (B, N, 3, S), ``b``: (B, N, 3), ``w``: (B, N) or None (= all ones).
+    Returns ``G`` (B, S, S), ``r`` (B, S, 1), ``SA = sum_n w_n A_n`` (B, 3, S),
+    ``Sb = sum_n w_n b_n`` (B, 3, 1) and ``W = sum_n w_n`` (B, 1, 1). The large GEMMs run
+    in float32; only the small results are converted.
+    """
+    B, N, _, S = jac.shape
+    jac_flat = jac.reshape(B, N * 3, S)
+    b_flat = b.reshape(B, N * 3, 1)
+    if w is None:
+        gram = jac_flat.mT @ jac_flat
+        rhs = jac_flat.mT @ b_flat
+        sum_A = jac.sum(dim=1)
+        sum_b = b.sum(dim=1).unsqueeze(-1)
+        w_sum = torch.full((B, 1, 1), float(N), device=jac.device, dtype=torch.float64)
+    else:
+        wjac = jac * w[:, :, None, None]
+        wjac_flat = wjac.reshape(B, N * 3, S)
+        gram = wjac_flat.mT @ jac_flat
+        rhs = wjac_flat.mT @ b_flat
+        sum_A = wjac.sum(dim=1)
+        sum_b = (b * w.unsqueeze(-1)).sum(dim=1).unsqueeze(-1)
+        w_sum = w.sum(dim=1).view(B, 1, 1).to(torch.float64)
+    return gram.double(), rhs.double(), sum_A.double(), sum_b.double(), w_sum
 
 
 def fit_scale_and_translation(
