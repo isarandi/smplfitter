@@ -71,7 +71,15 @@ def proj_SO3_analytic(A: torch.Tensor) -> torch.Tensor:
     mpp = (p * Mp).sum(-1)
     mpq = (p * Mq).sum(-1)
     mqq = (q * Mq).sum(-1)
-    th = 0.5 * torch.atan2(2.0 * mpq, mpp - mqq)
+    # atan2's backward is NaN at (0, 0), which is exactly the isotropic-complement
+    # case (lam2 == lam3) where any basis is a valid answer -> substitute (0, 1).
+    num = 2.0 * mpq
+    den = mpp - mqq
+    deg = (num * num + den * den) < 1e-12
+    th = 0.5 * torch.atan2(
+        torch.where(deg, torch.zeros_like(num), num),
+        torch.where(deg, torch.ones_like(den), den),
+    )
     c = torch.cos(th).unsqueeze(-1)
     s = torch.sin(th).unsqueeze(-1)
     v_big = c * p + s * q  # larger remaining eigenvalue
@@ -125,7 +133,9 @@ def _sym_eigvals3(M: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Te
     q = (a00 + a11 + a22) / 3.0
     p1 = a01 * a01 + a02 * a02 + a12 * a12
     p2 = (a00 - q) ** 2 + (a11 - q) ** 2 + (a22 - q) ** 2 + 2.0 * p1
-    p = torch.sqrt(p2 / 6.0)
+    # clamp_min keeps the backward finite at isotropic M (p2 == 0 exactly happens
+    # whenever the input is a scaled rotation): sqrt'(0) is infinite.
+    p = torch.sqrt((p2 / 6.0).clamp_min(1e-30))
 
     b00 = a00 - q
     b11 = a11 - q
@@ -136,7 +146,15 @@ def _sym_eigvals3(M: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Te
         + a02 * (a01 * a12 - b11 * a02)
     )
     p3 = p * p * p
-    r = divide_no_nan(det_shifted, 2.0 * p3).clamp(-1.0, 1.0)
+    # Near-degenerate spectra (tiny p3) make the division and the acos boundary
+    # gradients explode; treat them as isotropic (r = 0) - the eigenvector extraction
+    # downstream already handles that case via its fallbacks. The acos clamp stays
+    # strictly inside (-1, 1) because acos'(+-1) is infinite (r hits +-1 exactly for
+    # any double eigenvalue).
+    denom_ok = p3 > 1e-9
+    r_num = torch.where(denom_ok, det_shifted, torch.zeros_like(det_shifted))
+    r_den = torch.where(denom_ok, 2.0 * p3, torch.ones_like(p3))
+    r = (r_num / r_den).clamp(-1.0 + 1e-12, 1.0 - 1e-12)
     phi = torch.acos(r) / 3.0
 
     two_p = 2.0 * p
@@ -218,7 +236,9 @@ def align_unit_vectors(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     """
     cross = torch.linalg.cross(a, b, dim=-1)
     dot = (a * b).sum(dim=-1, keepdim=True)
-    sin_a = torch.linalg.norm(cross, dim=-1, keepdim=True)
+    # sqrt of a clamped sum instead of linalg.norm: the norm's backward is NaN at
+    # cross == 0 exactly (parallel vectors), and the clamp keeps it finite there.
+    sin_a = torch.sqrt((cross * cross).sum(-1, keepdim=True).clamp_min(1e-30))
     angle = torch.atan2(sin_a, dot)
     rotvec = divide_no_nan(cross * angle, sin_a)
     return rotvec2mat(rotvec)
@@ -234,7 +254,9 @@ def project_onto_plane(v: torch.Tensor, n_hat: torch.Tensor) -> torch.Tensor:
 
 
 def rotvec2mat(rotvec):
-    angle = torch.linalg.norm(rotvec, dim=-1, keepdim=True)
+    # sqrt of a clamped sum instead of linalg.norm: the norm's backward is NaN at
+    # rotvec == 0 exactly, and the clamp keeps it finite there.
+    angle = torch.sqrt((rotvec * rotvec).sum(-1, keepdim=True).clamp_min(1e-30))
     axis = divide_no_nan(rotvec, angle)
 
     sin_axis = torch.sin(angle) * axis
@@ -285,5 +307,7 @@ def mat2rotvec(rotmat):
     )
 
     xyz, w = torch.split(q, (3, 1), dim=-1)
-    norm = torch.linalg.norm(xyz, dim=-1, keepdim=True)
+    # sqrt of a clamped sum instead of linalg.norm: the norm's backward is NaN at
+    # xyz == 0 exactly (identity rotation), and the clamp keeps it finite there.
+    norm = torch.sqrt((xyz * xyz).sum(-1, keepdim=True).clamp_min(1e-30))
     return (divide_no_nan(torch.full_like(norm, 2.0), norm) * torch.atan2(norm, w)) * xyz
