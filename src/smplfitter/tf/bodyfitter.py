@@ -425,7 +425,7 @@ class BodyFitter:
             self._fit_global_rotations(
                 target_vertices,
                 target_joints,
-                tf.gather(initial_forw['vertices'], self.vertex_subset, axis=1),
+                initial_forw['vertices'],
                 initial_forw['joints'],
                 vertex_weights,
                 joint_weights,
@@ -442,7 +442,7 @@ class BodyFitter:
                 self._fit_global_rotations(
                     target_vertices,
                     target_joints,
-                    tf.gather(result['vertices'], self.vertex_subset, axis=1),
+                    result['vertices'],
                     result['joints'] if target_joints is not None else None,
                     vertex_weights,
                     joint_weights,
@@ -456,7 +456,7 @@ class BodyFitter:
         )
         scale_corr, trans = self._fit_scale_and_translation(
             target_vertices,
-            tf.gather(result['vertices'], self.vertex_subset, axis=1),
+            result['vertices'],
             target_joints,
             result['joints'],
             vertex_weights,
@@ -468,16 +468,10 @@ class BodyFitter:
         if final_adjust_rots:
             if scale_fit and scale_corr is not None:
                 factor = scale_corr[:, tf.newaxis, tf.newaxis]
-                ref_verts = (
-                    factor * tf.gather(result['vertices'], self.vertex_subset, axis=1)
-                    + trans[:, tf.newaxis]
-                )
+                ref_verts = factor * result['vertices'] + trans[:, tf.newaxis]
                 ref_joints = factor * result['joints'] + trans[:, tf.newaxis]
             else:
-                ref_verts = (
-                    tf.gather(result['vertices'], self.vertex_subset, axis=1)
-                    + trans[:, tf.newaxis]
-                )
+                ref_verts = result['vertices'] + trans[:, tf.newaxis]
                 ref_joints = result['joints'] + trans[:, tf.newaxis]
 
             glob_rotmats = self._fit_global_rotations_dependent(
@@ -583,7 +577,7 @@ class BodyFitter:
                 self._fit_global_rotations(
                     target_vertices,
                     target_joints,
-                    tf.gather(initial_forw['vertices'], self.vertex_subset, axis=1),
+                    initial_forw['vertices'],
                     initial_forw['joints'],
                     vertex_weights,
                     joint_weights,

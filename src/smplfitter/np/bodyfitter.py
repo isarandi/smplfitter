@@ -267,7 +267,7 @@ class BodyFitter:
                 pose_rotvecs=initial_pose_rotvecs,
             )
             initial_joints = initial_forw['joints']
-            initial_vertices = initial_forw['vertices'][:, self.vertex_subset]
+            initial_vertices = initial_forw['vertices']
             initial_orientations = initial_forw['orientations']
         else:
             initial_joints = self.body_model.J_template[np.newaxis]
