@@ -832,7 +832,7 @@ class BodyFitter:
                 [l2_regularizer_reference_all, jnp.zeros((batch_size, 1))], axis=1
             )
 
-        l2_regularizer_rhs = (l2_regularizer_all * l2_regularizer_reference_all)[..., None]
+        l2_regularizer_reference = l2_regularizer_reference_all[..., None]
 
         if share_beta:
             x = lstsq_partial_share(
@@ -840,11 +840,13 @@ class BodyFitter:
                 b,
                 w,
                 l2_regularizer_all,
-                l2_regularizer_rhs=l2_regularizer_rhs,
+                l2_regularizer_reference=l2_regularizer_reference,
                 n_shared=self.n_betas + (1 if self.enable_kid else 0),
             )
         else:
-            x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs=l2_regularizer_rhs)
+            x = lstsq(
+                A, b, w, l2_regularizer_all, l2_regularizer_reference=l2_regularizer_reference
+            )
 
         x = x.squeeze(-1)
         new_trans = mean_b.squeeze(1) - (mean_A.squeeze(1) @ x[..., None]).squeeze(-1)

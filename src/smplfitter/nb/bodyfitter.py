@@ -635,7 +635,8 @@ class BodyFitter:
                 axis=1,
             )
 
-        l2_regularizer_rhs = (l2_regularizer_all * l2_regularizer_reference_all)[:, :, np.newaxis]
+        l2_regularizer_reference = l2_regularizer_reference_all[:, :, np.newaxis]
+        l2_regularizer_rhs = l2_regularizer_all[:, np.newaxis] * l2_regularizer_reference
 
         if not share_beta and not scale_target and not scale_fit:
             # Fast path: compute normal equations without materializing full design matrix
@@ -708,11 +709,11 @@ class BodyFitter:
                     b,
                     w,
                     l2_regularizer_all,
-                    l2_regularizer_rhs,
+                    l2_regularizer_reference,
                     n_shared=self.n_betas + (1 if self.enable_kid else 0),
                 )
             else:
-                x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs)
+                x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_reference)
             x = x.squeeze(-1)
             new_trans = mean_b.squeeze(1) - np.matmul(
                 mean_A.squeeze(1), x[:, :, np.newaxis]

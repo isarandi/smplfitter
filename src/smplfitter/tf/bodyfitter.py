@@ -797,7 +797,7 @@ class BodyFitter:
         w = tf.repeat(tf.reshape(weights, [batch_size, -1]), 3, axis=1)
 
         # Setup regularization
-        l2_reg, l2_reg_rhs = self._setup_regularization(
+        l2_reg, l2_reg_ref = self._setup_regularization(
             batch_size,
             beta_regularizer,
             beta_regularizer2,
@@ -811,9 +811,9 @@ class BodyFitter:
         # Solve least squares
         n_shared = self.n_betas + (1 if self.enable_kid else 0)
         if share_beta:
-            x = lstsq_partial_share(A, b, w, l2_reg, l2_reg_rhs, n_shared)
+            x = lstsq_partial_share(A, b, w, l2_reg, l2_reg_ref, n_shared)
         else:
-            x = lstsq(A, b, w, l2_reg, l2_reg_rhs)
+            x = lstsq(A, b, w, l2_reg, l2_reg_ref)
         x = tf.squeeze(x, -1)
 
         # Compute translation
@@ -965,8 +965,7 @@ class BodyFitter:
             l2_reg = tf.concat([l2_reg, tf.constant([scale_regularizer], tf.float32)], axis=0)
             l2_reg_ref = tf.concat([l2_reg_ref, tf.zeros([batch_size, 1], tf.float32)], axis=1)
 
-        l2_reg_rhs = (l2_reg * l2_reg_ref)[:, :, tf.newaxis]
-        return l2_reg, l2_reg_rhs
+        return l2_reg, l2_reg_ref[:, :, tf.newaxis]
 
     def _fit_global_rotations(
         self,

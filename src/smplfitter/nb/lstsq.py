@@ -5,7 +5,7 @@ import numba
 
 
 @numba.njit(error_model='numpy', cache=True)
-def lstsq(matrix, rhs, weights, l2_regularizer=None, l2_regularizer_rhs=None, shared=False):
+def lstsq(matrix, rhs, weights, l2_regularizer=None, l2_regularizer_reference=None, shared=False):
     """Weighted least squares with L2 regularization.
 
     Args:
@@ -13,7 +13,8 @@ def lstsq(matrix, rhs, weights, l2_regularizer=None, l2_regularizer_rhs=None, sh
         rhs: (batch, n_points, n_outputs)
         weights: (batch, n_points)
         l2_regularizer: (n_params,) diagonal regularization
-        l2_regularizer_rhs: (batch, n_params, n_outputs) regularization reference
+        l2_regularizer_reference: (batch, n_params, n_outputs) reference values r of the
+            penalty sum_i lambda_i (x_i - r_i)^2; zero if None
         shared: If True, solve shared parameters across batch
 
     Returns:
@@ -46,17 +47,16 @@ def lstsq(matrix, rhs, weights, l2_regularizer=None, l2_regularizer_rhs=None, sh
         # ATb: weighted_m.T @ rhs using np.dot
         ATb[b] = np.dot(weighted_m.T, r)
 
-    # Add L2 regularization to diagonal
+    # Add the L2 penalty to the diagonal and pull the rhs toward the reference
     if l2_regularizer is not None:
         for b in range(batch_size):
             for i in range(n_params):
                 regularized_gramian[b, i, i] += l2_regularizer[i]
-
-    if l2_regularizer_rhs is not None:
-        for b in range(batch_size):
-            for i in range(n_params):
-                for o in range(n_outputs):
-                    ATb[b, i, o] += l2_regularizer_rhs[b, i, o]
+        if l2_regularizer_reference is not None:
+            for b in range(batch_size):
+                for i in range(n_params):
+                    for o in range(n_outputs):
+                        ATb[b, i, o] += l2_regularizer[i] * l2_regularizer_reference[b, i, o]
 
     if shared:
         # Sum across batch
@@ -184,7 +184,9 @@ def _solve_cholesky_lapack(A, b):
 
 
 @numba.njit(error_model='numpy', cache=True)
-def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs=None, n_shared=0):
+def lstsq_partial_share(
+    matrix, rhs, weights, l2_regularizer, l2_regularizer_reference=None, n_shared=0
+):
     """Least squares with some parameters shared across batch.
 
     Args:
@@ -192,7 +194,8 @@ def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs
         rhs: (batch, n_points, n_outputs)
         weights: (batch, n_points)
         l2_regularizer: (n_params,) diagonal regularization
-        l2_regularizer_rhs: (batch, n_params, n_outputs) regularization reference
+        l2_regularizer_reference: (batch, n_params, n_outputs) reference values r of the
+            penalty sum_i lambda_i (x_i - r_i)^2; zero if None
         n_shared: Number of parameters shared across batch (first n_shared params)
 
     Returns:
@@ -205,10 +208,10 @@ def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs
     n_indep = n_params - n_shared
 
     if n_indep == 0:
-        result = lstsq(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs, shared=True)
+        result = lstsq(matrix, rhs, weights, l2_regularizer, l2_regularizer_reference, shared=True)
         return result
 
-    # Add regularization equations to design matrix
+    # Append the penalty as extra equations: row i states x_i = r_i with weight lambda_i.
     # New matrix shape: (batch, n_points + n_params, n_params)
     new_n_points = n_points + n_params
     new_matrix = np.zeros((batch_size, new_n_points, n_params), dtype=np.float32)
@@ -226,10 +229,10 @@ def lstsq_partial_share(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs
         for p in range(n_points):
             for o in range(n_rhs_outputs):
                 new_rhs[b, p, o] = rhs[b, p, o]
-        if l2_regularizer_rhs is not None:
+        if l2_regularizer_reference is not None:
             for i in range(n_params):
                 for o in range(n_rhs_outputs):
-                    new_rhs[b, n_points + i, o] = l2_regularizer_rhs[b, i, o]
+                    new_rhs[b, n_points + i, o] = l2_regularizer_reference[b, i, o]
 
     # New weights: (batch, n_points + n_params)
     new_weights = np.zeros((batch_size, new_n_points), dtype=np.float32)

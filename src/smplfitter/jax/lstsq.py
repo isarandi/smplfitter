@@ -11,35 +11,37 @@ def lstsq(
     rhs: jnp.ndarray,
     weights: jnp.ndarray,
     l2_regularizer: Optional[jnp.ndarray] = None,
-    l2_regularizer_rhs: Optional[jnp.ndarray] = None,
+    l2_regularizer_reference: Optional[jnp.ndarray] = None,
     shared: bool = False,
 ) -> jnp.ndarray:
-    """Weighted least squares with L2 regularization.
+    """Weighted least squares via the normal equations, with a diagonal L2 penalty.
+
+    Minimizes ``sum_n w_n |A_n x - b_n|^2 + sum_i lambda_i (x_i - r_i)^2`` per batch
+    element, or the sum of these over the batch if ``shared`` is True.
 
     Args:
-        matrix: Design matrix, shape (batch, n_points, n_params)
-        rhs: Right-hand side, shape (batch, n_points, n_outputs)
-        weights: Per-point weights, shape (batch, n_points)
-        l2_regularizer: L2 regularization coefficients, shape (n_params,)
-        l2_regularizer_rhs: Regularization target, shape (batch, n_params, n_outputs)
-        shared: If True, solve a single shared problem across the batch
+        matrix: Design matrix A, shape (batch, n_points, n_params).
+        rhs: Right-hand side b, shape (batch, n_points, n_outputs).
+        weights: Per-point weights w, shape (batch, n_points).
+        l2_regularizer: Penalty weights lambda, shape (n_params,).
+        l2_regularizer_reference: Penalty reference values r, shape
+            (batch, n_params, n_outputs). Zero if None. Ignored without ``l2_regularizer``.
+        shared: If True, solve one system for the whole batch.
 
     Returns:
-        Solution, shape (batch, n_params, n_outputs) or (1, n_params, n_outputs) if shared
+        Solution x, shape (batch, n_params, n_outputs), or (1, n_params, n_outputs) if shared.
     """
     weighted_matrix = weights[..., None] * matrix
     regularized_gramian = jnp.swapaxes(weighted_matrix, -2, -1) @ matrix
+    ATb = jnp.swapaxes(weighted_matrix, -2, -1) @ rhs
 
     if l2_regularizer is not None:
-        # Add regularization to diagonal
         diag_indices = jnp.arange(regularized_gramian.shape[-1])
         regularized_gramian = regularized_gramian.at[..., diag_indices, diag_indices].add(
             l2_regularizer
         )
-
-    ATb = jnp.swapaxes(weighted_matrix, -2, -1) @ rhs
-    if l2_regularizer_rhs is not None:
-        ATb = ATb + l2_regularizer_rhs
+        if l2_regularizer_reference is not None:
+            ATb = ATb + l2_regularizer[:, None] * l2_regularizer_reference
 
     if shared:
         regularized_gramian = jnp.sum(regularized_gramian, axis=0, keepdims=True)
@@ -54,24 +56,26 @@ def lstsq_partial_share(
     rhs: jnp.ndarray,
     weights: jnp.ndarray,
     l2_regularizer: jnp.ndarray,
-    l2_regularizer_rhs: Optional[jnp.ndarray] = None,
+    l2_regularizer_reference: Optional[jnp.ndarray] = None,
     n_shared: int = 0,
 ) -> jnp.ndarray:
-    """Weighted least squares with partial parameter sharing.
+    """Weighted least squares where the first ``n_shared`` parameters are shared across the batch.
 
-    Some parameters are shared across the batch (e.g., shape betas),
-    while others are independent (e.g., scale correction per sample).
+    Same objective as :func:`lstsq`, but the first ``n_shared`` entries of x are a single
+    vector common to all batch elements (e.g. shape betas) while the remaining ones are
+    per-element (e.g. a scale correction).
 
     Args:
-        matrix: Design matrix, shape (batch, n_points, n_params)
-        rhs: Right-hand side, shape (batch, n_points, n_outputs)
-        weights: Per-point weights, shape (batch, n_points)
-        l2_regularizer: L2 regularization coefficients, shape (n_params,)
-        l2_regularizer_rhs: Regularization target, shape (batch, n_params, n_outputs)
-        n_shared: Number of shared parameters (first n_shared params are shared)
+        matrix: Design matrix A, shape (batch, n_points, n_params).
+        rhs: Right-hand side b, shape (batch, n_points, n_outputs).
+        weights: Per-point weights w, shape (batch, n_points).
+        l2_regularizer: Penalty weights lambda, shape (n_params,).
+        l2_regularizer_reference: Penalty reference values r, shape
+            (batch, n_params, n_outputs). Zero if None.
+        n_shared: Number of leading parameters shared across the batch.
 
     Returns:
-        Solution, shape (batch, n_params, n_outputs)
+        Solution x, shape (batch, n_params, n_outputs), with the shared part repeated.
     """
     batch_size = matrix.shape[0]
     n_params = matrix.shape[-1]
@@ -79,16 +83,16 @@ def lstsq_partial_share(
     n_indep = n_params - n_shared
 
     if n_indep == 0:
-        result = lstsq(matrix, rhs, weights, l2_regularizer, l2_regularizer_rhs, shared=True)
+        result = lstsq(matrix, rhs, weights, l2_regularizer, l2_regularizer_reference, shared=True)
         return jnp.broadcast_to(result, (batch_size, n_params, n_rhs_outputs))
 
-    # Add the regularization equations into the design matrix
+    # Append the penalty as extra equations: row i states x_i = r_i with weight lambda_i.
     eye = jnp.eye(n_params)
     eye_expanded = jnp.broadcast_to(eye, (batch_size, n_params, n_params))
     matrix = jnp.concatenate([matrix, eye_expanded], axis=1)
 
-    if l2_regularizer_rhs is not None:
-        rhs = jnp.concatenate([rhs, l2_regularizer_rhs], axis=1)
+    if l2_regularizer_reference is not None:
+        rhs = jnp.concatenate([rhs, l2_regularizer_reference], axis=1)
     else:
         rhs = jnp.pad(rhs, ((0, 0), (0, n_params), (0, 0)))
 

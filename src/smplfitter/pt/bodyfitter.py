@@ -1252,7 +1252,7 @@ class BodyFitter(nn.Module):
                 [l2_regularizer_reference_all, torch.zeros([batch_size, 1], device=device)], dim=1
             )
 
-        l2_regularizer_rhs = (l2_regularizer_all * l2_regularizer_reference_all).unsqueeze(-1)
+        l2_regularizer_reference = l2_regularizer_reference_all.unsqueeze(-1)
 
         # l2_regularizer_all = torch.diag(l2_regularizer_all)
         # print('Loading penalty matrix')
@@ -1269,12 +1269,14 @@ class BodyFitter(nn.Module):
                 b,
                 w,
                 l2_regularizer_all,
-                l2_regularizer_rhs=l2_regularizer_rhs,
+                l2_regularizer_reference=l2_regularizer_reference,
                 n_shared=self.n_betas + (1 if self.enable_kid else 0),
             )
 
         else:
-            x = lstsq(A, b, w, l2_regularizer_all, l2_regularizer_rhs=l2_regularizer_rhs)
+            x = lstsq(
+                A, b, w, l2_regularizer_all, l2_regularizer_reference=l2_regularizer_reference
+            )
 
         x = x.squeeze(-1)
         new_trans = mean_b.squeeze(1) - torch.matmul(mean_A.squeeze(1), x.unsqueeze(-1)).squeeze(

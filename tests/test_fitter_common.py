@@ -329,3 +329,62 @@ class TestFitterKnownParams:
         mean_joints_err = np.mean(joints_err)
         assert mean_verts_err < 5e-3, f'Vertex error {mean_verts_err:.4f} >= 5e-3'
         assert mean_joints_err < 5e-3, f'Joint error {mean_joints_err:.4f} >= 5e-3'
+
+
+class TestShareBetaReference:
+    """The shape reference (initial_shape_betas) must act identically with and without share_beta.
+
+    Oracle: a batch of identical copies of one target. Sharing the betas across identical
+    samples is the same least-squares problem as fitting them independently, so both
+    paths must return the same betas. The regularizer weight is set away from 1 so that
+    a solver which scales the reference by the weight (or drops it) is detected.
+    """
+
+    @staticmethod
+    def _identical_batch_fit(backend: 'Backend', share_beta: bool, scale_fit: bool):
+        np.random.seed(45)
+        model, fitter = _make_model_and_fitter(backend)
+        batch_size = 3
+        pose_rotvecs = np.random.randn(1, 24 * 3).astype(np.float32) * 0.1
+        shape_betas = np.random.randn(1, 10).astype(np.float32)
+        trans = np.random.randn(1, 3).astype(np.float32)
+        reference = np.random.randn(1, 10).astype(np.float32)
+        pose_rotvecs, shape_betas, trans, reference = (
+            np.broadcast_to(x, (batch_size,) + x.shape[1:]).copy()
+            for x in (pose_rotvecs, shape_betas, trans, reference)
+        )
+        with backend.context():
+            res = model(
+                pose_rotvecs=backend.to_tensor(pose_rotvecs),
+                shape_betas=backend.to_tensor(shape_betas),
+                trans=backend.to_tensor(trans),
+            )
+            fit = fitter.fit(
+                target_vertices=res['vertices'],
+                target_joints=res['joints'],
+                num_iter=1,
+                beta_regularizer=0.3,
+                beta_regularizer2=0.3,
+                share_beta=share_beta,
+                scale_fit=scale_fit,
+                final_adjust_rots=False,
+                initial_shape_betas=backend.to_tensor(reference),
+                requested_keys=['shape_betas'],
+            )
+        return {k: backend.to_numpy(v) for k, v in fit.items()}
+
+    def test_share_beta_reference(self, fitter_backend: Backend):
+        indep = self._identical_batch_fit(fitter_backend, share_beta=False, scale_fit=False)
+        shared = self._identical_batch_fit(fitter_backend, share_beta=True, scale_fit=False)
+        diff = np.max(np.abs(indep['shape_betas'] - shared['shape_betas']))
+        assert diff < 1e-3, f'Shared and independent betas differ by {diff:.2e}'
+
+    def test_share_beta_reference_with_scale(self, fitter_backend: Backend):
+        indep = self._identical_batch_fit(fitter_backend, share_beta=False, scale_fit=True)
+        shared = self._identical_batch_fit(fitter_backend, share_beta=True, scale_fit=True)
+        diff = np.max(np.abs(indep['shape_betas'] - shared['shape_betas']))
+        assert diff < 1e-3, f'Shared and independent betas differ by {diff:.2e}'
+        diff_scale = np.max(np.abs(indep['scale_corr'] - shared['scale_corr']))
+        assert diff_scale < 1e-4, f'Shared and independent scale differ by {diff_scale:.2e}'
+
+
