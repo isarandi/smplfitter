@@ -1,9 +1,9 @@
 from __future__ import annotations
-import os
 from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
+from .. import common as smplfitter_common
 from . import bodyfitter as _bodyfitter
 from ..common import load_vertex_converter_csr
 
@@ -29,11 +29,11 @@ class BodyConverter(nn.Module):
         self.body_model_out = body_model_out
         self.fitter = _bodyfitter.BodyFitter(self.body_model_out, enable_kid=True)
 
-        DATA_ROOT = os.getenv('DATA_ROOT', '.')
+        body_models_dir = smplfitter_common.body_models_dir()
         if self.body_model_in.num_vertices == 6890 and self.body_model_out.num_vertices == 10475:
-            csr_path = f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'
+            csr_path = f'{body_models_dir}/smpl2smplx_deftrafo_setup.pkl'
         elif self.body_model_in.num_vertices == 10475 and self.body_model_out.num_vertices == 6890:
-            csr_path = f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'
+            csr_path = f'{body_models_dir}/smplx2smpl_deftrafo_setup.pkl'
         else:
             csr_path = None
 

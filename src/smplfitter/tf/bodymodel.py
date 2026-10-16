@@ -18,8 +18,8 @@ class BodyModel:
         model_name: Name of the model type.
         gender: Gender of the model, which can be 'neutral', 'female' or 'male'.
         model_root: Path to the directory containing model files. By default,
-            {DATA_ROOT}/body_models/{model_name} is used, with the DATA_ROOT environment
-            variable.
+            ``{body_models_dir()}/{model_name}`` is used; see
+            :func:`smplfitter.common.body_models_dir`.
         num_betas: Number of shape parameters (betas) to use. By default, all available betas
             are used.
         vertex_subset_size: Size of a pre-computed vertex subset to use for faster fitting.

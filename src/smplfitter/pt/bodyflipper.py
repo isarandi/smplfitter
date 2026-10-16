@@ -1,5 +1,4 @@
 from __future__ import annotations
-import os
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
@@ -9,6 +8,7 @@ import torch
 import torch.nn as nn
 from ..common import load_vertex_converter_csr
 from .bodyconverter import scipy2torch_csr
+from .. import common as smplfitter_common
 from . import bodyfitter as _bodyfitter
 
 if TYPE_CHECKING:
@@ -138,15 +138,15 @@ def get_mirror_mapping(points):
 
 
 def get_mirror_csr(num_verts):
-    DATA_ROOT = os.getenv('DATA_ROOT', '.')
-    smplx2mirror = load_mirror_csr(f'{DATA_ROOT}/body_models/smplx/smplx_flip_correspondences.npz')
+    body_models_dir = smplfitter_common.body_models_dir()
+    smplx2mirror = load_mirror_csr(f'{body_models_dir}/smplx/smplx_flip_correspondences.npz')
 
     if num_verts == 6890:
         smpl2smplx_csr = load_vertex_converter_csr(
-            f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'
+            f'{body_models_dir}/smpl2smplx_deftrafo_setup.pkl'
         )
         smplx2smpl_csr = load_vertex_converter_csr(
-            f'{DATA_ROOT}/body_models/smplx2smpl_deftrafo_setup.pkl'
+            f'{body_models_dir}/smplx2smpl_deftrafo_setup.pkl'
         )
         smpl2mirror = smplx2smpl_csr @ smplx2mirror @ smpl2smplx_csr
         return scipy2torch_csr(smpl2mirror)
