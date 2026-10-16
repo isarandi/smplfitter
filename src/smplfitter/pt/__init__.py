@@ -13,6 +13,7 @@ try:
     from .bodyfitter import BodyFitter
     from .bodyconverter import BodyConverter
     from .bodyflipper import BodyFlipper
+    from .streaming import fit_streaming
 except ImportError as e:
     if 'torch' in str(e).lower():
         raise ImportError(
@@ -27,6 +28,7 @@ __all__ = [
     'BodyFitter',
     'BodyConverter',
     'BodyFlipper',
+    'fit_streaming',
     'get_cached_body_model',
     'get_cached_fit_fn',
 ]

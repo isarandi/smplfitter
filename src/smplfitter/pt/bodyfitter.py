@@ -548,6 +548,40 @@ class BodyFitter(nn.Module):
                 result_non_none[k] = v
         return result_non_none
 
+    def fit_streaming(
+        self,
+        chunks,
+        num_iter: int = 1,
+        beta_regularizer: float = 1,
+        beta_regularizer2: float = 0,
+        kid_regularizer: Optional[float] = None,
+        final_adjust_rots: bool = True,
+        initial_shape_betas: Optional[torch.Tensor] = None,
+        initial_kid_factor: Optional[torch.Tensor] = None,
+        requested_keys: Optional[list[str]] = None,
+        max_chunk_frames: Optional[int] = 4096,
+    ) -> dict[str, torch.Tensor]:
+        """Shared-shape fit over more frames than fit in memory; see
+        :func:`smplfitter.pt.fit_streaming`. Equivalent to ``fit(share_beta=True)`` over the
+        concatenation of all chunks that ``chunks()`` yields, processed one chunk at a time.
+        (Plain Python method: not TorchScript-exported, since it takes a callable.)
+        """
+        from .streaming import fit_streaming
+
+        return fit_streaming(
+            self,
+            chunks,
+            num_iter,
+            beta_regularizer,
+            beta_regularizer2,
+            kid_regularizer,
+            final_adjust_rots,
+            initial_shape_betas,
+            initial_kid_factor,
+            requested_keys,
+            max_chunk_frames,
+        )
+
     @torch.jit.export
     def fit_with_known_pose(
         self,
