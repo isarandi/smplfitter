@@ -6,6 +6,7 @@ from typing import Optional, TYPE_CHECKING
 import torch
 import torch.nn as nn
 
+from .. import common as smplfitter_common
 from .bodyfitter import BodyFitter
 from .rotation import rotvec2mat, mat2rotvec
 
@@ -53,6 +54,8 @@ class BodyFitterOpt(nn.Module):
         self.body_model = body_model
         self.fitter = BodyFitter(body_model, enable_kid=enable_kid)
         self.enable_kid = enable_kid
+        if enable_kid:
+            smplfitter_common._check_kid_template(body_model)
 
     def fit(
         self,

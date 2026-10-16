@@ -32,8 +32,13 @@ pip install 'smplfitter[numba]'     # Numba
 Download the model files using the built-in downloader (requires registration at each site first):
 
 ```bash
-python -m smplfitter.download
+python -m smplfitter.download                  # all models
+python -m smplfitter.download --models smpl    # only some (smpl smplx smplh mano correspondences)
 ```
+
+From Python: `smplfitter.download.download(['smpl'])`. Models already present are skipped;
+the email and password are asked for (or read from `SMPLFITTER_EMAIL` / `SMPLFITTER_PASSWORD`)
+only if something needs downloading.
 
 You need to register separately at each of these sites:
 - https://smpl.is.tue.mpg.de/ (SMPL)

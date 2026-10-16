@@ -2,20 +2,35 @@
 
 Usage::
 
-    python -m smplfitter.download [target_directory]
+    python -m smplfitter.download [--models smpl smplx ...] [target_directory]
 
-Requires separate registration at each of these sites beforehand:
+or from Python::
 
-- https://smpl.is.tue.mpg.de/ (SMPL)
-- https://smpl-x.is.tue.mpg.de/ (SMPL-X)
-- https://mano.is.tue.mpg.de/ (MANO and SMPL+H)
-- https://agora.is.tue.mpg.de/ (kid body templates)
+    import smplfitter.download
+    smplfitter.download.download(['smpl'])
 
-Use the same email and password for all registrations.
+Without ``--models``, all models are downloaded. Each model needs a registration at the
+listed sites beforehand (use the same email and password for all of them):
+
+- ``smpl``: https://smpl.is.tue.mpg.de/ and https://agora.is.tue.mpg.de/ (kid template)
+- ``smplx``: https://smpl-x.is.tue.mpg.de/ and https://agora.is.tue.mpg.de/ (kid template)
+- ``smplh``: https://mano.is.tue.mpg.de/ and https://agora.is.tue.mpg.de/ (kid template)
+- ``mano``: https://mano.is.tue.mpg.de/
+- ``correspondences`` (SMPL <-> SMPL-X): https://smpl-x.is.tue.mpg.de/
+
+Without an AGORA account, use ``--no-kid-template``: an all-zero placeholder then stands
+in for the kid template, and the body models work with the kid factor disabled
+(``enable_kid=False``; enabling it raises an error). A later download without the option
+replaces the placeholder.
+
+Models already present are skipped, and the login is asked for only if something is
+missing. The email and password can also come from the ``SMPLFITTER_EMAIL`` and
+``SMPLFITTER_PASSWORD`` environment variables.
 """
 
 from __future__ import annotations
 
+import argparse
 import getpass
 import http.cookiejar
 import os
@@ -29,49 +44,184 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+MODELS = ('smpl', 'smplx', 'smplh', 'mano', 'correspondences')
+
+_DOMAIN_REGISTRATION_URLS = {
+    'smpl': 'https://smpl.is.tue.mpg.de/',
+    'smplx': 'https://smpl-x.is.tue.mpg.de/',
+    'mano': 'https://mano.is.tue.mpg.de/',
+    'agora': 'https://agora.is.tue.mpg.de/',
+}
+
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ('-h', '--help'):
-        print(__doc__.strip())
-        sys.exit(0)
+    parser = argparse.ArgumentParser(
+        prog='python -m smplfitter.download',
+        description=__doc__.split('Usage::')[0].strip(),
+        epilog='Registrations needed (same email and password at all sites):\n'
+        + __doc__.split('beforehand (use the same email and password for all of them):')[1],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        'target_directory',
+        nargs='?',
+        help='body_models directory (default: asked, or from SMPLFITTER_BODY_MODELS / DATA_ROOT)',
+    )
+    parser.add_argument('--models', nargs='+', choices=MODELS, default=list(MODELS))
+    parser.add_argument(
+        '--no-kid-template',
+        dest='kid_template',
+        action='store_false',
+        help='write an all-zero placeholder instead of downloading the kid template (no '
+        'AGORA account needed; kid fitting then unavailable)',
+    )
+    args = parser.parse_args()
 
-    if len(sys.argv) > 1:
-        body_models_dir = Path(sys.argv[1])
+    if args.target_directory:
+        target = Path(args.target_directory)
     else:
-        body_models_dir = _resolve_body_models_dir()
+        target = _resolve_body_models_dir_interactively()
+    print(f'Body models will be saved to: {target}')
+    try:
+        download(args.models, target, kid_template=args.kid_template)
+    except PermissionError as e:
+        print(f'\n{e}', file=sys.stderr)
+        sys.exit(1)
+    print()
+    print(f'Body models are in {target}')
 
-    print(f'Body models will be saved to: {body_models_dir}')
-    print()
-    print('You need to register at each of these sites:')
-    print('  - https://smpl.is.tue.mpg.de/       (SMPL)')
-    print('  - https://smpl-x.is.tue.mpg.de/     (SMPL-X)')
-    print('  - https://mano.is.tue.mpg.de/       (MANO and SMPL+H)')
-    print('  - https://agora.is.tue.mpg.de/      (kid body templates)')
-    print()
-    print('Use the same email and password for all registrations.')
-    print()
-    email = input('Email: ')
-    password = getpass.getpass('Password: ')
+
+def download(models=MODELS, body_models_dir=None, email=None, password=None, kid_template=True):
+    """Download body model files, skipping the models that are already present.
+
+    Args:
+        models: names from :data:`MODELS`. ``smpl``, ``smplx`` and ``smplh`` include the
+            kid template, which the body model loader requires for them.
+        body_models_dir: the directory that contains (or will contain) ``smpl/``,
+            ``smplx/``, etc. Default: :func:`smplfitter.common.body_models_dir`, where the
+            loader looks.
+        email: account email for the download sites. Default: ``$SMPLFITTER_EMAIL``, else
+            asked on the terminal (only if something needs downloading).
+        password: account password. Default: ``$SMPLFITTER_PASSWORD``, else asked.
+        kid_template: if False, write an all-zero placeholder instead of downloading the kid
+            template, so no AGORA account is needed; the body models then work only with
+            ``enable_kid=False`` (enabling it raises an error). If True,
+            an existing placeholder is replaced by the real file.
+
+    Returns:
+        The body_models directory, as a :class:`pathlib.Path`.
+
+    Raises:
+        ValueError: for an unknown model name.
+        PermissionError: if a site rejects the login (wrong password, or no registration
+            at that site).
+    """
+    if isinstance(models, str):
+        models = [models]
+    if unknown := sorted(set(models) - set(MODELS)):
+        raise ValueError(f'Unknown model(s) {unknown}; choose from {list(MODELS)}')
+    if body_models_dir is None:
+        from smplfitter.common import body_models_dir as default_dir
+
+        body_models_dir = default_dir()
+    body_models_dir = Path(body_models_dir)
+
+    missing = [
+        m for m in MODELS if m in models and not _is_present(m, body_models_dir, kid_template)
+    ]
+    if not missing:
+        return body_models_dir
+    if not kid_template:
+        for model in missing:
+            _write_kid_template_placeholder(body_models_dir, model)
+        missing = [m for m in missing if not _is_present(m, body_models_dir, kid_template)]
+        _link_kid_templates(body_models_dir)
+        if not missing:
+            return body_models_dir
+
+    email = email or os.getenv('SMPLFITTER_EMAIL')
+    password = password or os.getenv('SMPLFITTER_PASSWORD')
+    if not (email and password):
+        print(f'Downloading: {", ".join(missing)}. This needs an account (same email and')
+        print('password) registered at each of these sites:')
+        sites = {d for m in missing for d in _SITES[m] if kid_template or d != 'agora'}
+        for domain in sorted(sites):
+            print(f'  - {_DOMAIN_REGISTRATION_URLS[domain]}')
+        email = email or input('Email: ')
+        password = password or getpass.getpass('Password: ')
 
     opener = _make_opener()
     username_enc = urllib.parse.quote(email, safe='')
     password_enc = urllib.parse.quote(password, safe='')
     auth_data = f'username={username_enc}&password={password_enc}'.encode()
 
-    _download_smpl(opener, auth_data, body_models_dir)
-    _download_smplx(opener, auth_data, body_models_dir)
-    _download_smplh(opener, auth_data, body_models_dir)
-    _download_mano(opener, auth_data, body_models_dir)
-    _download_kid_templates(opener, auth_data, body_models_dir)
-    _download_correspondences(opener, auth_data, body_models_dir)
-
-    print()
-    print('All downloads complete!')
-    print(f'Body models saved to: {body_models_dir}')
+    for model in missing:
+        _DOWNLOADERS[model](opener, auth_data, body_models_dir)
+        if kid_template and model in _KID_TEMPLATE_SOURCE:
+            _download_kid_template(opener, auth_data, body_models_dir, model)
+    _link_kid_templates(body_models_dir)
+    return body_models_dir
 
 
-def _resolve_body_models_dir():
-    """Resolve the body models directory from environment variables or default."""
+# Sites (keys of _DOMAIN_REGISTRATION_URLS) that each model's files come from
+_SITES = {
+    'smpl': ('smpl', 'agora'),
+    'smplx': ('smplx', 'agora'),
+    'smplh': ('mano', 'agora'),
+    'mano': ('mano',),
+    'correspondences': ('smplx',),
+}
+
+# The kid template each model uses: SMPL+H shares SMPL's
+_KID_TEMPLATE_SOURCE = {'smpl': 'smpl', 'smplx': 'smplx', 'smplh': 'smpl'}
+# Shape of the kid templates (one point per vertex of the model they belong to)
+_KID_TEMPLATE_SHAPE = {'smpl': (6890, 3), 'smplx': (10475, 3)}
+
+
+def _is_present(model, body_models_dir, kid_template=True):
+    """Whether the model's files exist; with ``kid_template``, a placeholder does not count."""
+    files = {
+        'smpl': ['smpl/basicmodel_neutral_lbs_10_207_0_v1.1.0.pkl'],
+        'smplx': ['smplx/SMPLX_NEUTRAL.npz'],
+        'smplh': ['smplh/SMPLH_female.pkl'],
+        'mano': ['mano/MANO_RIGHT.pkl'],
+        'correspondences': [
+            'smpl2smplx_deftrafo_setup.pkl',
+            'smplx2smpl_deftrafo_setup.pkl',
+        ],
+    }[model]
+    if not all((body_models_dir / f).exists() for f in files):
+        return False
+    if model not in _KID_TEMPLATE_SOURCE:
+        return True
+    kid_path = body_models_dir / _KID_TEMPLATE_SOURCE[model] / 'kid_template.npy'
+    if not kid_path.exists():
+        return False
+    return not kid_template or not _is_kid_template_placeholder(kid_path)
+
+
+def _write_kid_template_placeholder(body_models_dir, model):
+    """Write the all-zero kid template for ``model``, unless a kid template file exists."""
+    if model not in _KID_TEMPLATE_SOURCE:
+        return
+    import numpy as np
+
+    source = _KID_TEMPLATE_SOURCE[model]
+    path = body_models_dir / source / 'kid_template.npy'
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(path, np.zeros(_KID_TEMPLATE_SHAPE[source], np.float64))
+        print(f'[kid template] Wrote an all-zero placeholder to {path} (kid factor disabled).')
+
+
+def _is_kid_template_placeholder(path):
+    import numpy as np
+
+    return not np.load(path).any()
+
+
+def _resolve_body_models_dir_interactively():
+    """Like smplfitter.common.body_models_dir, but confirm the platform default first."""
     body_models_dir = os.getenv('SMPLFITTER_BODY_MODELS')
     if body_models_dir:
         return Path(body_models_dir)
@@ -105,14 +255,6 @@ def _make_opener():
     )
 
 
-_DOMAIN_REGISTRATION_URLS = {
-    'smpl': 'https://smpl.is.tue.mpg.de/',
-    'smplx': 'https://smpl-x.is.tue.mpg.de/',
-    'mano': 'https://mano.is.tue.mpg.de/',
-    'agora': 'https://agora.is.tue.mpg.de/',
-}
-
-
 def _download_mpi(opener, auth_data, domain, filename, peek_only=False):
     """Download a file from the MPI server with POST authentication."""
     url = (
@@ -125,11 +267,10 @@ def _download_mpi(opener, auth_data, domain, filename, peek_only=False):
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             reg_url = _DOMAIN_REGISTRATION_URLS.get(domain, '???')
-            print(
-                f'\nAuthentication failed for "{domain}" domain.\n' f'Register at {reg_url}',
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            raise PermissionError(
+                f'Login rejected for the "{domain}" downloads: wrong email or password, or '
+                f'no registration at {reg_url}'
+            ) from None
         raise
     if peek_only:
         response.read(1024)
@@ -332,40 +473,28 @@ def _download_mano(opener, auth_data, body_models_dir):
     print('[mano] Done.')
 
 
-def _download_kid_templates(opener, auth_data, body_models_dir):
-    """Download kid templates from AGORA dataset."""
-    smpl_kid = body_models_dir / 'smpl' / 'kid_template.npy'
-    smplx_kid = body_models_dir / 'smplx' / 'kid_template.npy'
-
-    if smpl_kid.exists() and smplx_kid.exists():
-        print('[kid templates] Already downloaded, skipping.')
+def _download_kid_template(opener, auth_data, body_models_dir, model):
+    """Download the kid template (from AGORA) that ``model`` uses, if missing."""
+    source = _KID_TEMPLATE_SOURCE[model]
+    target = body_models_dir / source / 'kid_template.npy'
+    if target.exists() and not _is_kid_template_placeholder(target):
         return
+    print(f'[kid template] Downloading the {source} kid template from AGORA...')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    response = _download_mpi(opener, auth_data, 'agora', f'{source}_kid_template.npy')
+    data = response.read()
+    target.unlink(missing_ok=True)  # may be a symlink to a placeholder
+    target.write_bytes(data)
+    print(f'  Saved {target}')
 
-    print('[kid templates] Downloading from AGORA...')
 
-    if not smpl_kid.exists():
-        response = _download_mpi(opener, auth_data, 'agora', 'smpl_kid_template.npy')
-        smpl_kid.write_bytes(response.read())
-        print(f'  Saved {smpl_kid}')
-
-    if not smplx_kid.exists():
-        response = _download_mpi(opener, auth_data, 'agora', 'smplx_kid_template.npy')
-        smplx_kid.write_bytes(response.read())
-        print(f'  Saved {smplx_kid}')
-
-    # Symlink kid templates for smplh, smplh16, smplxlh
-    for subdir in ('smplh', 'smplh16'):
+def _link_kid_templates(body_models_dir):
+    """Link the kid templates into the variant folders (smplh, smplh16, smplxlh)."""
+    for subdir, source in (('smplh', 'smpl'), ('smplh16', 'smpl'), ('smplxlh', 'smplx')):
+        source_file = body_models_dir / source / 'kid_template.npy'
         target = body_models_dir / subdir / 'kid_template.npy'
-        if not target.exists() and (body_models_dir / subdir).exists():
-            _symlink(target, os.path.relpath(smpl_kid, target.parent))
-
-    smplxlh_dir = body_models_dir / 'smplxlh'
-    if smplxlh_dir.exists():
-        target = smplxlh_dir / 'kid_template.npy'
-        if not target.exists():
-            _symlink(target, os.path.relpath(smplx_kid, target.parent))
-
-    print('[kid templates] Done.')
+        if source_file.exists() and target.parent.exists() and not target.exists():
+            _symlink(target, os.path.relpath(source_file, target.parent))
 
 
 def _download_correspondences(opener, auth_data, body_models_dir):
@@ -415,6 +544,15 @@ def _download_spin_regressors(smpl_dir):
                 basename = os.path.basename(member.name)
                 if basename in ('J_regressor_extra.npy', 'J_regressor_h36m.npy'):
                     _extract_tar_member(tf, member, smpl_dir / basename)
+
+
+_DOWNLOADERS = {
+    'smpl': _download_smpl,
+    'smplx': _download_smplx,
+    'smplh': _download_smplh,
+    'mano': _download_mano,
+    'correspondences': _download_correspondences,
+}
 
 
 # --- Helpers ---

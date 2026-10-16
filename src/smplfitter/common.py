@@ -189,6 +189,11 @@ class ModelData:
     kid_J_shapedir: np.ndarray
     """Kid shape blend shape for joints, shape (num_joints, 3)."""
 
+    _has_kid_template: bool
+    """False if the kid template file is the all-zero placeholder that ``smplfitter.download
+    --no-kid-template`` writes; the kid blend shapes are then zero, and fitters refuse
+    ``enable_kid=True``."""
+
     weights: np.ndarray
     """Skinning weights, shape (num_vertices, num_joints)."""
 
@@ -212,11 +217,40 @@ class ModelData:
     """Names of the joints in the body model."""
 
 
-def _default_body_models_dir():
-    """Return the platform-appropriate default body_models directory."""
+def body_models_dir():
+    """Return the body_models directory, the folder that contains ``smpl/``, ``smplx/``, etc.
+
+    The first that applies: ``$SMPLFITTER_BODY_MODELS``, ``$DATA_ROOT/body_models``,
+    ``./body_models`` if it exists, and the platform's user data directory (e.g.
+    ``~/.local/share/smplfitter/body_models`` on Linux). The directory need not exist yet.
+    """
+    if body_models_dir := os.getenv('SMPLFITTER_BODY_MODELS'):
+        return body_models_dir
+    if data_root := os.getenv('DATA_ROOT'):
+        return f'{data_root}/body_models'
+    if osp.isdir('body_models'):
+        return 'body_models'
     import platformdirs
 
     return osp.join(platformdirs.user_data_dir('smplfitter'), 'body_models')
+
+
+def _check_kid_template(body_model):
+    """Raise if ``body_model`` has no kid template, i.e. kid fitting cannot work.
+
+    The kid template comes from the AGORA website, which needs its own registration. Users
+    without it can download the other files with ``python -m smplfitter.download
+    --no-kid-template``, which writes an all-zero placeholder in its place; the body model
+    then works, but only with the kid factor disabled (``enable_kid=False``).
+    """
+    if not body_model._has_kid_template:
+        raise ValueError(
+            f'enable_kid=True needs the kid template of the {body_model.model_name} model, '
+            f'but {body_models_dir()}/{body_model.model_name}/kid_template.npy is missing or '
+            f'is the all-zero placeholder. The kid template needs an account at '
+            f'https://agora.is.tue.mpg.de/; with that, run: '
+            f'python -m smplfitter.download --models {body_model.model_name}'
+        )
 
 
 def initialize(
@@ -230,16 +264,7 @@ def initialize(
     joint_regressor_post_lbs=None,
 ):
     if model_root is None:
-        body_models_dir = os.getenv('SMPLFITTER_BODY_MODELS')
-        if body_models_dir is None:
-            data_root = os.getenv('DATA_ROOT')
-            if data_root is not None:
-                body_models_dir = f'{data_root}/body_models'
-            elif osp.isdir('body_models'):
-                body_models_dir = 'body_models'
-            else:
-                body_models_dir = _default_body_models_dir()
-        model_root = f'{body_models_dir}/{model_name}'
+        model_root = f'{body_models_dir()}/{model_name}'
 
     with _chumpy_stub_modules():
         gender_maps = {
@@ -328,6 +353,11 @@ def initialize(
                 f'Kid template not found: {kid_path}\n'
                 f'Download it: python -m smplfitter.download'
             ) from None
+        # An all-zero file is the placeholder for users without the kid template
+        res['_has_kid_template'] = bool(np.any(v_template_smil))
+    else:
+        res['_has_kid_template'] = False
+    if res['_has_kid_template']:
         res['kid_shapedir'] = (
             v_template_smil - np.mean(v_template_smil, axis=0) - res['v_template']
         )
@@ -388,6 +418,7 @@ def initialize(
         J_shapedirs=res['J_shapedirs'][:, :, :num_betas],
         kid_shapedir=res['kid_shapedir'][vertex_subset],
         kid_J_shapedir=res['kid_J_shapedir'],
+        _has_kid_template=res['_has_kid_template'],
         weights=res['weights'][vertex_subset],
         kintree_parents=res['kintree_parents'],
         faces=faces,

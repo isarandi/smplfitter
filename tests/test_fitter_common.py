@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 if TYPE_CHECKING:
     from conftest import Backend
@@ -388,3 +390,37 @@ class TestShareBetaReference:
         assert diff_scale < 1e-4, f'Shared and independent scale differ by {diff_scale:.2e}'
 
 
+class TestKidTemplatePlaceholder:
+    """An all-zero kid_template.npy (written by ``download --no-kid-template``) disables kids.
+
+    The model must load and fit with enable_kid=False, and enable_kid=True must raise an
+    error that points to the AGORA registration and the download command.
+    """
+
+    @pytest.fixture
+    def placeholder_models(self, tmp_path, monkeypatch):
+        from smplfitter.common import body_models_dir
+
+        real_smpl = os.path.join(body_models_dir(), 'smpl')
+        if not os.path.isdir(real_smpl):
+            pytest.skip('SMPL body model files not available')
+        smpl = tmp_path / 'smpl'
+        smpl.mkdir()
+        for name in os.listdir(real_smpl):
+            if name != 'kid_template.npy':
+                (smpl / name).symlink_to(os.path.join(os.path.abspath(real_smpl), name))
+        np.save(smpl / 'kid_template.npy', np.zeros((6890, 3)))
+        monkeypatch.setenv('SMPLFITTER_BODY_MODELS', str(tmp_path))
+
+    def test_model_works_without_kid(self, fitter_backend: Backend, placeholder_models):
+        model, fitter = _make_model_and_fitter(fitter_backend)
+        assert not model._has_kid_template
+        assert np.all(fitter_backend.to_numpy(model.kid_shapedir) == 0)
+
+    def test_enable_kid_raises(self, fitter_backend: Backend, placeholder_models):
+        with pytest.raises(ValueError, match='agora.is.tue.mpg.de.*--models smpl'):
+            _make_model_and_fitter(fitter_backend, enable_kid=True)
+
+    def test_real_template_is_detected(self, fitter_backend: Backend):
+        model, _ = _make_model_and_fitter(fitter_backend, enable_kid=True)
+        assert model._has_kid_template

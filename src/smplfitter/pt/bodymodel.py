@@ -87,6 +87,7 @@ class BodyModel(nn.Module):
         self.J_shapedirs = nn.Buffer(torch.tensor(data.J_shapedirs, dtype=torch.float32))
         self.kid_shapedir = nn.Buffer(torch.tensor(data.kid_shapedir, dtype=torch.float32))
         self.kid_J_shapedir = nn.Buffer(torch.tensor(data.kid_J_shapedir, dtype=torch.float32))
+        self._has_kid_template: bool = data._has_kid_template
         self.weights = nn.Buffer(torch.tensor(data.weights, dtype=torch.float32))
         self.kintree_parents_tensor = nn.Buffer(
             torch.tensor(data.kintree_parents, dtype=torch.int64)

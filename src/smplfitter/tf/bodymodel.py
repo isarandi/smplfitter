@@ -58,6 +58,7 @@ class BodyModel:
         self.J_shapedirs = tf.constant(data.J_shapedirs, tf.float32)
         self.kid_shapedir = tf.constant(data.kid_shapedir, tf.float32)
         self.kid_J_shapedir = tf.constant(data.kid_J_shapedir, tf.float32)
+        self._has_kid_template = data._has_kid_template
         self.weights = tf.constant(data.weights, tf.float32)
         self.kintree_parents = data.kintree_parents
         self.faces = data.faces

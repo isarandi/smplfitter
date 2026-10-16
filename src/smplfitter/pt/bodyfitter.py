@@ -5,6 +5,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 import torch
 import torch.nn as nn
+from .. import common as smplfitter_common
 from .lstsq import lstsq, lstsq_partial_share
 from .rotation import align_unit_vectors, divide_no_nan, mat2rotvec, proj_SO3, rotvec2mat
 
@@ -31,6 +32,8 @@ class BodyFitter(nn.Module):
         self.body_model = body_model
         self.n_betas = self.body_model.shapedirs.shape[2]
         self.enable_kid = enable_kid
+        if enable_kid:
+            smplfitter_common._check_kid_template(body_model)
         self.is_smpl_family = body_model.model_name.startswith('smpl')
 
         part_assignment = torch.argmax(body_model.weights, dim=1)

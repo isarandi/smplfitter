@@ -17,7 +17,19 @@ redistributed due to licensing). The easiest way is to use the built-in download
 
 This will prompt for your email and password (register at
 https://smpl.is.tue.mpg.de/ first), then download SMPL, SMPL-X, SMPL+H, and
-MANO model files.
+MANO model files. To download only some of them, list them with ``--models``
+(``smpl``, ``smplx``, ``smplh``, ``mano``, ``correspondences``); the help text
+(``--help``) lists the sites each one needs a registration at. Models already present
+are skipped, and the login is asked for only if something is missing.
+
+The same is available from Python, e.g. for a tool that needs only SMPL:
+
+.. code-block:: python
+
+   import smplfitter.download
+
+   smplfitter.download.download(['smpl'])  # email and password: arguments,
+   # $SMPLFITTER_EMAIL / $SMPLFITTER_PASSWORD, or asked on the terminal
 
 By default, files are saved to the location given by the ``SMPLFITTER_BODY_MODELS``
 environment variable, or ``$DATA_ROOT/body_models``, or the platform default data

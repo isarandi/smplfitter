@@ -4,6 +4,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 import numba
 
+from .. import common as smplfitter_common
 from .lstsq import lstsq, lstsq_partial_share, _solve_cholesky
 from .rotation import (
     mat2rotvec,
@@ -33,6 +34,8 @@ class BodyFitter:
         self.body_model = body_model
         self.n_betas = body_model.shapedirs.shape[2]
         self.enable_kid = enable_kid
+        if enable_kid:
+            smplfitter_common._check_kid_template(body_model)
         self.is_smpl_family = body_model.model_name.startswith('smpl')
 
         self.default_mesh_tf = body_model.single()['vertices']

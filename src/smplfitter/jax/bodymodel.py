@@ -37,6 +37,7 @@ class BodyModel:
             self.J_shapedirs = jnp.array(data.J_shapedirs, dtype=jnp.float32)
             self.kid_shapedir = jnp.array(data.kid_shapedir, dtype=jnp.float32)
             self.kid_J_shapedir = jnp.array(data.kid_J_shapedir, dtype=jnp.float32)
+            self._has_kid_template = data._has_kid_template
             self.weights = jnp.array(data.weights, dtype=jnp.float32)
             self.J_regressor_post_lbs = jnp.array(data.J_regressor_post_lbs, dtype=jnp.float32)
 

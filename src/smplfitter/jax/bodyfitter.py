@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 import jax.numpy as jnp
+from .. import common as smplfitter_common
 from .lstsq import lstsq, lstsq_partial_share
 from .rotation import align_unit_vectors, divide_no_nan, mat2rotvec, proj_SO3, rotvec2mat
 
@@ -25,6 +26,8 @@ class BodyFitter:
         self.body_model = body_model
         self.n_betas = body_model.shapedirs.shape[2]
         self.enable_kid = enable_kid
+        if enable_kid:
+            smplfitter_common._check_kid_template(body_model)
         self.is_smpl_family = body_model.model_name.startswith('smpl')
 
         # Compute default mesh in T-pose

@@ -64,6 +64,7 @@ class BodyModel:
         self.J_shapedirs = np.array(data.J_shapedirs, np.float32)
         self.kid_shapedir = np.array(data.kid_shapedir, np.float32)
         self.kid_J_shapedir = np.array(data.kid_J_shapedir, np.float32)
+        self._has_kid_template = data._has_kid_template
         self.weights = np.array(data.weights, np.float32)
         self.kintree_parents = np.array(data.kintree_parents, np.int64)
         self.faces = data.faces
