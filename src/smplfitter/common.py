@@ -149,7 +149,10 @@ def _set_module_for_docs(module_name, module_globals, all_names):
     for name in all_names:
         obj = module_globals.get(name)
         if obj is not None and callable(obj):
-            obj._module_original_ = obj.__module__
+            # guard: aliased exports (same object under two names) and re-imports must not
+            # re-read the already-patched module into _module_original_
+            if not hasattr(obj, '_module_original_'):
+                obj._module_original_ = obj.__module__
             obj.__module__ = module_name
 
 
