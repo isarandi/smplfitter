@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from typing import TYPE_CHECKING
 
@@ -424,3 +425,95 @@ class TestKidTemplatePlaceholder:
     def test_real_template_is_detected(self, fitter_backend: Backend):
         model, _ = _make_model_and_fitter(fitter_backend, enable_kid=True)
         assert model._has_kid_template
+
+
+# Backend agreement: all backends must give the same fit for the same inputs, up to float
+# rounding. They implement the same algorithm independently, so this catches algorithmic
+# drift (for example a step that one backend weights and another does not). The reference
+# is the NumPy backend; fits are compared through the vertices of the fitted bodies.
+
+# Rounding alone moves the fitted vertices by up to ~0.03 mm between backends; algorithmic
+# differences moved them by millimeters.
+TOLERANCE_M = 2e-4
+
+SETTINGS = {
+    'joints_weights_iter3': dict(joints=True, weights=True, num_iter=3),
+    'joints_weights_iter1': dict(joints=True, weights=True, num_iter=1),
+    'joints_noweights_noadjust': dict(
+        joints=True, weights=False, num_iter=3, final_adjust_rots=False
+    ),
+    'nojoints_weights_iter3': dict(joints=False, weights=True, num_iter=3),
+    'nojoints_noweights_iter1': dict(joints=False, weights=False, num_iter=1),
+    'joints_weights_scale_target': dict(joints=True, weights=True, num_iter=2, scale_target=True),
+}
+
+
+@pytest.mark.parametrize('setting', list(SETTINGS))
+def test_fit_matches_numpy_backend(fitter_backend: Backend, setting: str):
+    if fitter_backend.name == 'np':
+        pytest.skip('the NumPy backend is the reference')
+    reference = _numpy_fit_vertices(setting)
+    vertices = _fit_vertices(fitter_backend, setting)
+    max_diff = np.max(np.linalg.norm(vertices - reference, axis=-1))
+    assert (
+        max_diff < TOLERANCE_M
+    ), f'{fitter_backend.name}: max vertex diff {max_diff * 1000:.3f} mm'
+
+
+@functools.lru_cache
+def _numpy_fit_vertices(setting: str) -> np.ndarray:
+    from conftest import _make_np_backend
+
+    return _fit_vertices(_make_np_backend(), setting)
+
+
+def _fit_vertices(backend: Backend, setting: str) -> np.ndarray:
+    """Vertices (B, V, 3) of the bodies fitted by the backend, posed by the NumPy model."""
+    import smplfitter.np
+
+    s = dict(SETTINGS[setting])
+    use_joints = s.pop('joints')
+    use_weights = s.pop('weights')
+    verts, joints, vertex_weights, joint_weights = _targets()
+    model = backend.prepare_model(backend.module.BodyModel('smpl', 'neutral', num_betas=10))
+    fitter = backend.prepare_fitter(backend.module.BodyFitter(model))
+    t = backend.to_tensor
+    with backend.context():
+        fit = fitter.fit(
+            t(verts),
+            t(joints) if use_joints else None,
+            t(vertex_weights) if use_weights else None,
+            t(joint_weights) if use_weights and use_joints else None,
+            beta_regularizer=1.0,
+            requested_keys=['pose_rotvecs', 'shape_betas'],
+            **s,
+        )
+    fit = {k: backend.to_numpy(v) for k, v in fit.items() if v is not None}
+    np_model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
+    vertices = np_model(
+        pose_rotvecs=fit['pose_rotvecs'], shape_betas=fit['shape_betas'], trans=fit['trans']
+    )['vertices']
+    if 'scale_corr' in fit:
+        # scale_target: the fit matches the target scaled by scale_corr
+        vertices = vertices / fit['scale_corr'][:, None, None]
+    return vertices
+
+
+@functools.lru_cache
+def _targets():
+    """Noisy SMPL vertices and joints of varied poses, with random weights."""
+    import smplfitter.np
+
+    rng = np.random.default_rng(0)
+    batch_size = 6
+    model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
+    res = model(
+        pose_rotvecs=rng.normal(0, 0.4, (batch_size, 72)).astype(np.float32),
+        shape_betas=rng.normal(0, 1, (batch_size, 10)).astype(np.float32),
+        trans=rng.normal(0, 1, (batch_size, 3)).astype(np.float32),
+    )
+    verts = res['vertices'] + rng.normal(0, 0.02, res['vertices'].shape)
+    joints = res['joints'] + rng.normal(0, 0.02, res['joints'].shape)
+    vertex_weights = rng.uniform(0.2, 2, verts.shape[:2])
+    joint_weights = rng.uniform(0.2, 2, joints.shape[:2])
+    return tuple(x.astype(np.float32) for x in (verts, joints, vertex_weights, joint_weights))

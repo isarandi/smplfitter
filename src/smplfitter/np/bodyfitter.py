@@ -273,7 +273,10 @@ class BodyFitter:
             initial_vertices = initial_forw['vertices']
             initial_orientations = initial_forw['orientations']
         else:
-            initial_joints = self.body_model.J_template[np.newaxis]
+            # Without an initial pose, the first estimate uses joints regressed from the target
+            # vertices and from the template mesh, also when target joints are given (see
+            # smplfitter.pt.BodyFitter for why).
+            initial_joints = None
             initial_vertices = self.default_mesh_tf[np.newaxis]
             initial_orientations = None
 
@@ -339,6 +342,8 @@ class BodyFitter:
             + (['joints'] if target_joints is not None or final_adjust_rots else []),
         )
         if final_adjust_rots:
+            # Unweighted on purpose: weighting this step made the fits less accurate
+            # (see smplfitter.pt.BodyFitter).
             ref_verts = result['vertices']
             ref_joints = result['joints']
             ref_trans = result['trans']
@@ -349,8 +354,8 @@ class BodyFitter:
                     target_joints * factor if target_joints is not None else None,
                     ref_verts,
                     ref_joints,
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     result['shape_betas'],
                     None,
@@ -364,8 +369,8 @@ class BodyFitter:
                     target_joints,
                     factor * ref_verts + (1 - factor) * ref_trans[:, np.newaxis],
                     factor * ref_joints + (1 - factor) * ref_trans[:, np.newaxis],
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     result['shape_betas'],
                     result['scale_corr'],
@@ -378,8 +383,8 @@ class BodyFitter:
                     target_joints,
                     ref_verts,
                     ref_joints,
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     result['shape_betas'],
                     None,
@@ -615,14 +620,16 @@ class BodyFitter:
 
         # Optional final rotation adjustment
         if final_adjust_rots:
+            # Unweighted on purpose: weighting this step made the fits less accurate
+            # (see smplfitter.pt.BodyFitter).
             if scale_fit and ref_scale_corr is not None:
                 glob_rotmats = self._fit_global_rotations_dependent(
                     target_vertices,
                     target_joints,
                     ref_scale_corr[:, np.newaxis, np.newaxis] * ref_verts + trans[:, np.newaxis],
                     ref_scale_corr[:, np.newaxis, np.newaxis] * ref_joints + trans[:, np.newaxis],
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     shape_betas,
                     ref_scale_corr,
@@ -635,8 +642,8 @@ class BodyFitter:
                     target_joints,
                     ref_verts + trans[:, np.newaxis],
                     ref_joints + trans[:, np.newaxis],
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     shape_betas,
                     None,

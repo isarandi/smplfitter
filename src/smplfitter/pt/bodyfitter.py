@@ -21,6 +21,18 @@ class BodyFitter(nn.Module):
             gender.
         enable_kid: Enables the use of a kid blendshape, allowing for fitting kid shapes as in
             AGORA :footcite:`patel2021agora`.
+
+    Two design choices of the fit were chosen for accuracy on noisy targets (synthetic
+    SMPL bodies with AMASS poses and heteroscedastic, partly correlated noise scaled by real
+    NLF uncertainties, with and without limb outliers; all backends implement them):
+
+    * The first rotation estimate uses joints regressed from the target vertices and from
+      the template mesh, even when target joints are given. Later iterations use the
+      given target joints. This lowered the mean vertex error by 0.02-0.2 mm.
+    * The final adjustment of the limb orientations (``final_adjust_rots``) ignores the
+      vertex and joint weights. Weighting it raised the mean vertex error by 0.1-0.7 mm,
+      for weights ``uncertainty ** -p`` with p from 1 to 2, also when the uncertainties
+      were exactly calibrated. The weights still apply to all other steps.
     """
 
     def __init__(
@@ -384,13 +396,15 @@ class BodyFitter(nn.Module):
                 @ initial_forw['orientations']
             )
         else:
-            initial_joints = self.body_model.J_template[None]
-            initial_vertices = self.default_mesh_tf[None]
+            # The first estimate uses joints regressed from the target vertices and from the
+            # template mesh, also when target joints are given: a regressed joint averages
+            # many vertices, so it is less noisy than a single predicted joint. With noisy
+            # targets this gives more accurate fits (see the class docstring).
             glob_rotmats = self._fit_global_rotations(
                 target_vertices,
-                target_joints,
-                initial_vertices,
-                initial_joints,
+                None,
+                self.default_mesh_tf[None],
+                None,
                 vertex_weights,
                 joint_weights,
                 share_beta,
@@ -464,6 +478,8 @@ class BodyFitter(nn.Module):
         ref_scale_corr = result['scale_corr'][:, None, None] if scale_target or scale_fit else None
 
         if final_adjust_rots:
+            # Unweighted on purpose: weighting this step made the fits less accurate
+            # (see the class docstring).
             assert ref_joints is not None
             if scale_target:
                 assert ref_scale_corr is not None
@@ -472,8 +488,8 @@ class BodyFitter(nn.Module):
                     target_joints * ref_scale_corr if target_joints is not None else None,
                     ref_verts,
                     ref_joints,
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     ref_shape,
                     None,
@@ -488,8 +504,8 @@ class BodyFitter(nn.Module):
                     target_joints,
                     ref_scale_corr * ref_verts + (1 - ref_scale_corr) * ref_trans.unsqueeze(-2),
                     ref_scale_corr * ref_joints + (1 - ref_scale_corr) * ref_trans.unsqueeze(-2),
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     ref_shape,
                     ref_scale_corr,
@@ -503,8 +519,8 @@ class BodyFitter(nn.Module):
                     target_joints,
                     ref_verts,
                     ref_joints,
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     ref_shape,
                     None,
@@ -809,6 +825,8 @@ class BodyFitter(nn.Module):
         )
 
         if final_adjust_rots:
+            # Unweighted on purpose: weighting this step made the fits less accurate
+            # (see the class docstring).
             if scale_fit:
                 assert ref_scale_corr is not None
                 glob_rotmats = self._fit_global_rotations_dependent(
@@ -816,8 +834,8 @@ class BodyFitter(nn.Module):
                     target_joints,
                     ref_scale_corr * ref_verts + ref_trans.unsqueeze(-2),
                     ref_scale_corr * ref_joints + ref_trans.unsqueeze(-2),
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     shape_betas,
                     ref_scale_corr,
@@ -830,8 +848,8 @@ class BodyFitter(nn.Module):
                     target_joints,
                     ref_verts + ref_trans.unsqueeze(-2),
                     ref_joints + ref_trans.unsqueeze(-2),
-                    vertex_weights,
-                    joint_weights,
+                    None,
+                    None,
                     glob_rotmats,
                     shape_betas,
                     None,

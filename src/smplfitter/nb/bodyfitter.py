@@ -142,7 +142,9 @@ class BodyFitter:
             initial_joints = None
             initial_orientations = None
 
-        # Compute regressed joints if needed (match PT: if either is None, recompute both)
+        # Without an initial pose, the first estimate uses joints regressed from the target
+        # vertices and from the template mesh, also when target joints are given (see
+        # smplfitter.pt.BodyFitter for why).
         if target_joints is None or initial_joints is None:
             target_joints_for_rot = self.body_model.J_regressor_post_lbs @ target_vertices
             reference_joints_for_rot = self.body_model.J_regressor_post_lbs @ initial_vertices
@@ -254,8 +256,6 @@ class BodyFitter:
                     target_joints * factor if target_joints is not None else None,
                     ref_verts,
                     ref_joints,
-                    vertex_weights,
-                    joint_weights,
                     glob_rotmats,
                     ref_shape,
                     None,
@@ -269,8 +269,6 @@ class BodyFitter:
                     target_joints,
                     factor * ref_verts + (1 - factor) * ref_trans[:, np.newaxis],
                     factor * ref_joints + (1 - factor) * ref_trans[:, np.newaxis],
-                    vertex_weights,
-                    joint_weights,
                     glob_rotmats,
                     ref_shape,
                     ref_scale_corr,
@@ -283,8 +281,6 @@ class BodyFitter:
                     target_joints,
                     ref_verts,
                     ref_joints,
-                    vertex_weights,
-                    joint_weights,
                     glob_rotmats,
                     ref_shape,
                     None,
@@ -494,8 +490,6 @@ class BodyFitter:
                     target_joints,
                     ref_scale_corr[:, np.newaxis, np.newaxis] * ref_verts + trans[:, np.newaxis],
                     ref_scale_corr[:, np.newaxis, np.newaxis] * ref_joints + trans[:, np.newaxis],
-                    vertex_weights,
-                    joint_weights,
                     glob_rotmats,
                     shape_betas,
                     ref_scale_corr,
@@ -508,8 +502,6 @@ class BodyFitter:
                     target_joints,
                     ref_verts + trans[:, np.newaxis],
                     ref_joints + trans[:, np.newaxis],
-                    vertex_weights,
-                    joint_weights,
                     glob_rotmats,
                     shape_betas,
                     None,  # scale_corr
@@ -766,19 +758,21 @@ class BodyFitter:
         target_joints: Optional[np.ndarray],
         reference_vertices: np.ndarray,
         reference_joints: np.ndarray,
-        vertex_weights: Optional[np.ndarray],
-        joint_weights: Optional[np.ndarray],
         glob_rots_prev: np.ndarray,
         shape_betas: np.ndarray,
         scale_corr: Optional[np.ndarray],
         trans: np.ndarray,
         kid_factor: Optional[np.ndarray],
     ) -> np.ndarray:
-        """Fit global rotations dependent on skeleton structure."""
+        """Final adjustment of the body part orientations, one part at a time in tree order.
+
+        Unweighted on purpose: weighting this step made the fits less accurate (see
+        smplfitter.pt.BodyFitter). Without target joints, the joints regressed from the target
+        vertices are compared with joints regressed from the reference vertices.
+        """
         true_reference_joints = reference_joints
-        if target_joints is None:
+        if target_joints is None or reference_joints is None:
             target_joints = self.body_model.J_regressor_post_lbs @ target_vertices
-        if reference_joints is None:
             reference_joints = self.body_model.J_regressor_post_lbs @ reference_vertices
         if true_reference_joints is None:
             true_reference_joints = reference_joints
@@ -801,8 +795,6 @@ class BodyFitter:
             reference_vertices,
             reference_joints,
             true_reference_joints,
-            vertex_weights,
-            joint_weights,
             glob_rots_prev,
             j,
             trans,
@@ -1142,8 +1134,6 @@ def _fit_global_rotations_dependent_core(
     reference_vertices,
     reference_joints,
     true_reference_joints,
-    vertex_weights,
-    joint_weights,
     glob_rots_prev,
     j,  # joint positions from shape
     trans,

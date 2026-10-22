@@ -227,13 +227,14 @@ class _SharedShapeAccumulator:
             + trans.unsqueeze(1)
         )
         if final_adjust_rots:
+            # Unweighted, as in BodyFitter.fit
             glob_rotmats = self.f._fit_global_rotations_dependent(
                 target_vertices,
                 target_joints,
                 ref_verts,
                 ref_joints,
-                vertex_weights,
-                joint_weights,
+                None,
+                None,
                 glob_rotmats,
                 betas,
                 None,
@@ -277,11 +278,12 @@ class _SharedShapeAccumulator:
         f = self.f
         if self.shape is None:
             assert self._i_chunk == len(self.rots), 'chunk order changed between passes'
+            # Regressed joints in the first estimate, as in BodyFitter.fit
             return f._fit_global_rotations(
                 target_vertices,
-                target_joints,
+                None,
                 f.default_mesh_tf[None],
-                f.body_model.J_template[None],
+                None,
                 vertex_weights,
                 joint_weights,
                 True,
