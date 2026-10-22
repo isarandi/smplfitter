@@ -95,31 +95,11 @@ def _make_jax_backend() -> Optional[Backend]:
         return None
 
 
-def _make_cy_backend() -> Optional[Backend]:
-    """Create Cython backend if available."""
-    try:
-        import smplfitter.cy as module
-
-        return Backend(
-            name='cy',
-            module=module,
-            to_tensor=lambda x: x,
-            to_numpy=lambda x: np.asarray(x),
-            prepare_model=lambda m: m,
-            prepare_fitter=lambda f: f,
-            context=nullcontext,
-            num_betas_on_model=True,
-        )
-    except ImportError:
-        return None
-
-
 _BACKEND_FACTORIES = {
     'pt': _make_pt_backend,
     'nb': _make_nb_backend,
     'np': _make_np_backend,
     'jax': _make_jax_backend,
-    'cy': _make_cy_backend,
 }
 
 
@@ -148,14 +128,6 @@ def _get_available_backends() -> list[str]:
     except ImportError:
         pass
 
-    # Check Cython
-    try:
-        import smplfitter.cy  # noqa: F401
-
-        available.append('cy')
-    except ImportError:
-        pass
-
     return available
 
 
@@ -169,7 +141,7 @@ def backend(request) -> Backend:
     return result
 
 
-@pytest.fixture(params=['pt', 'nb', 'np', 'jax', 'cy'], ids=lambda x: x)
+@pytest.fixture(params=['pt', 'nb', 'np', 'jax'], ids=lambda x: x)
 def fitter_backend(request) -> Backend:
     """Fixture for backends that have BodyFitter."""
     if request.param not in _get_available_backends():

@@ -1,4 +1,4 @@
-"""Benchmark rotvec2mat: NumPy vs Numba vs Cython."""
+"""Benchmark rotvec2mat: NumPy vs Numba."""
 
 import numpy as np
 import time
@@ -22,14 +22,6 @@ def main():
     from smplfitter.np.rotation import rotvec2mat as rotvec2mat_np
     from smplfitter.nb.rotation import rotvec2mat as rotvec2mat_nb
 
-    try:
-        from smplfitter.cy.rotation import rotvec2mat as rotvec2mat_cy
-
-        has_cython = True
-    except ImportError:
-        print('Cython not built. Run: python setup_cy.py build_ext --inplace')
-        has_cython = False
-
     print('Benchmarking rotvec2mat')
     print('=' * 60)
 
@@ -44,22 +36,11 @@ def main():
             print(f'  NumPy:  {time_np:8.3f} ms')
             print(f'  Numba:  {time_nb:8.3f} ms  ({time_np/time_nb:5.1f}x vs NumPy)')
 
-            if has_cython:
-                time_cy = benchmark(rotvec2mat_cy, rotvec)
-                print(
-                    f'  Cython: {time_cy:8.3f} ms  ({time_np/time_cy:5.1f}x vs NumPy, {time_nb/time_cy:5.2f}x vs Numba)'
-                )
-
             # Verify correctness
             result_np = rotvec2mat_np(rotvec)
             result_nb = rotvec2mat_nb(rotvec)
             if not np.allclose(result_np, result_nb, atol=1e-5):
                 print('  WARNING: Numba result differs!')
-
-            if has_cython:
-                result_cy = rotvec2mat_cy(rotvec)
-                if not np.allclose(result_np, result_cy, atol=1e-5):
-                    print('  WARNING: Cython result differs!')
 
 
 if __name__ == '__main__':
