@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from .. import common as smplfitter_common
 from .lstsq import lstsq, lstsq_partial_share
-from .rotation import align_unit_vectors, divide_no_nan, mat2rotvec, proj_SO3, rotvec2mat
+from .rotation import align_unit_vectors, divide_no_nan, mat2rotvec, proj_SO3_with, rotvec2mat
 
 if TYPE_CHECKING:
     import smplfitter.pt
@@ -316,6 +316,7 @@ class BodyFitter(nn.Module):
         initial_shape_betas: Optional[torch.Tensor] = None,
         initial_kid_factor: Optional[torch.Tensor] = None,
         requested_keys: Optional[list[str]] = None,
+        rotation_projection: str = 'svd',
     ) -> dict[str, torch.Tensor]:
         """
         Fits the body model to target vertices and optionally joints by optimizing for shape and
@@ -350,6 +351,10 @@ class BodyFitter(nn.Module):
                 available. Usually not necessary (experimental).
             initial_kid_factor: Same as above, but for the kid blendshape factor.
             requested_keys: List of keys specifying which results to return.
+            rotation_projection: How body part rotations are projected onto SO(3): ``'svd'``
+                (the default, fastest without CUDA graphs) or ``'analytic'`` (closed form, no
+                host-device synchronization, so the fit can be captured in a CUDA graph; same
+                results up to float rounding).
 
         Returns:
             Dictionary
@@ -394,6 +399,7 @@ class BodyFitter(nn.Module):
                     vertex_weights,
                     joint_weights,
                     share_beta,
+                    rotation_projection,
                 )
                 @ initial_forw['orientations']
             )
@@ -410,6 +416,7 @@ class BodyFitter(nn.Module):
                 vertex_weights,
                 joint_weights,
                 share_beta,
+                rotation_projection,
             )
 
         device = self.body_model.v_template.device
@@ -447,6 +454,7 @@ class BodyFitter(nn.Module):
                     vertex_weights,
                     joint_weights,
                     share_beta,
+                    rotation_projection,
                 )
                 @ glob_rotmats
             )
@@ -498,6 +506,7 @@ class BodyFitter(nn.Module):
                     ref_trans,
                     ref_kid_factor,
                     share_beta,
+                    rotation_projection,
                 )
             elif scale_fit:
                 assert ref_scale_corr is not None
@@ -514,6 +523,7 @@ class BodyFitter(nn.Module):
                     ref_trans,
                     ref_kid_factor,
                     share_beta,
+                    rotation_projection,
                 )
             else:
                 glob_rotmats = self._fit_global_rotations_dependent(
@@ -529,6 +539,7 @@ class BodyFitter(nn.Module):
                     ref_trans,
                     ref_kid_factor,
                     share_beta,
+                    rotation_projection,
                 )
 
         # Add the mean back (scaled appropriately if using scale correction)
@@ -721,6 +732,7 @@ class BodyFitter(nn.Module):
         initial_pose_rotvecs: Optional[torch.Tensor] = None,
         scale_fit: bool = False,
         requested_keys: Optional[list[str]] = None,
+        rotation_projection: str = 'svd',
     ) -> dict[str, torch.Tensor]:
         """
         Fits the body model pose and translation to target vertices and optionally target joints,
@@ -748,6 +760,10 @@ class BodyFitter(nn.Module):
             scale_fit: Whether to estimate a scale factor to align the fitted mesh with the
                 target vertices.
             requested_keys: List of result keys to return.
+            rotation_projection: How body part rotations are projected onto SO(3): ``'svd'``
+                (the default, fastest without CUDA graphs) or ``'analytic'`` (closed form, no
+                host-device synchronization, so the fit can be captured in a CUDA graph; same
+                results up to float rounding).
 
         Returns:
             Dictionary
@@ -787,6 +803,7 @@ class BodyFitter(nn.Module):
                 initial_joints,
                 vertex_weights,
                 joint_weights,
+                rotation_projection=rotation_projection,
             )
             @ initial_forw['orientations']
         )
@@ -807,6 +824,7 @@ class BodyFitter(nn.Module):
                     ref_joints,
                     vertex_weights,
                     joint_weights,
+                    rotation_projection=rotation_projection,
                 )
                 @ glob_rotmats
             )
@@ -843,6 +861,7 @@ class BodyFitter(nn.Module):
                     ref_scale_corr,
                     ref_trans,
                     kid_factor,
+                    rotation_projection=rotation_projection,
                 )
             else:
                 glob_rotmats = self._fit_global_rotations_dependent(
@@ -857,6 +876,7 @@ class BodyFitter(nn.Module):
                     None,
                     ref_trans,
                     kid_factor,
+                    rotation_projection=rotation_projection,
                 )
 
         # Add the mean back
@@ -1386,6 +1406,7 @@ class BodyFitter(nn.Module):
         vertex_weights: Optional[torch.Tensor],
         joint_weights: Optional[torch.Tensor],
         share_beta: bool = False,
+        rotation_projection: str = 'svd',
     ) -> torch.Tensor:
         """Global orientation of each body part via swing-twist decomposition, batched.
 
@@ -1443,7 +1464,7 @@ class BodyFitter(nn.Module):
 
         # Kabsch bucket (multi-joint parts + leaf parts): one batched projection.
         A_kabsch = torch.cat([A_multi, A_vert.index_select(1, self.leaf_part_indices)], dim=1)
-        R_kabsch = proj_SO3(A_kabsch)
+        R_kabsch = proj_SO3_with(A_kabsch, rotation_projection)
 
         # Bone bucket: batched swing (bone alignment) + twist (from vertices).
         b_ref = (
@@ -1488,6 +1509,7 @@ class BodyFitter(nn.Module):
         trans: torch.Tensor,
         kid_factor: Optional[torch.Tensor],
         share_beta: bool = False,
+        rotation_projection: str = 'svd',
     ) -> torch.Tensor:
         true_reference_joints = reference_joints
         if target_joints is None or reference_joints is None:
@@ -1592,7 +1614,8 @@ class BodyFitter(nn.Module):
                 rots.index_copy_(
                     1,
                     adj,
-                    proj_SO3(A_vert + A_joint) @ glob_rots_prev.index_select(1, adj),
+                    proj_SO3_with(A_vert + A_joint, rotation_projection)
+                    @ glob_rots_prev.index_select(1, adj),
                 )
 
             if self.is_smpl_family:
@@ -1648,7 +1671,7 @@ class BodyFitter(nn.Module):
                 ).unsqueeze(-1)
             A_joint = estim_joints.mT @ default_joints  # (B, 3, 3)
 
-            glob_rot = proj_SO3(A_vert + A_joint) @ glob_rots_prev[:, i]
+            glob_rot = proj_SO3_with(A_vert + A_joint, rotation_projection) @ glob_rots_prev[:, i]
             glob_rots.append(glob_rot)
 
         return torch.stack(glob_rots, dim=1)

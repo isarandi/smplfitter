@@ -23,6 +23,16 @@ def proj_SO3(A: torch.Tensor) -> torch.Tensor:
     return proj_SO3_svd(A)
 
 
+def proj_SO3_with(A: torch.Tensor, method: str) -> torch.Tensor:
+    """Project (..., 3, 3) matrices onto SO(3) with the given method, ``'svd'`` (see
+    :func:`proj_SO3_svd`) or ``'analytic'`` (see :func:`proj_SO3_analytic`)."""
+    if method == 'svd':
+        return proj_SO3_svd(A)
+    if method == 'analytic':
+        return proj_SO3_analytic(A)
+    raise ValueError(f'Unknown rotation projection {method}, use "svd" or "analytic"')
+
+
 def proj_SO3_analytic(A: torch.Tensor) -> torch.Tensor:
     """Project (..., 3, 3) matrices onto SO(3) via a closed-form polar decomposition.
 
