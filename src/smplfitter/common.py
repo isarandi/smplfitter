@@ -5,6 +5,7 @@ import os
 import os.path as osp
 import pickle
 import sys
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -376,6 +377,7 @@ def initialize(
     else:
         res['J_template'] = res['J_regressor'] @ res['v_template']
 
+    v_template_rest = res['v_template']
     res['v_template'] = res['v_template'] - np.einsum(
         'vcx,x->vc',
         res['posedirs'],
@@ -395,8 +397,6 @@ def initialize(
         regressor_path = f'{model_root}/vertex_subset_joint_regr_post_lbs_{vertex_subset_size}.npy'
         if osp.exists(regressor_path):
             joint_regressor_post_lbs = np.load(regressor_path)
-        else:
-            joint_regressor_post_lbs = res['J_regressor'][:, vertex_subset]
 
     if vertex_subset is None:
         vertex_subset = np.arange(res['num_vertices'], dtype=np.int64)
@@ -407,7 +407,19 @@ def initialize(
         faces = res['faces']
 
     if joint_regressor_post_lbs is None:
-        joint_regressor_post_lbs = res['J_regressor']
+        if len(vertex_subset) == res['num_vertices']:
+            joint_regressor_post_lbs = res['J_regressor']
+        else:
+            warnings.warn(
+                f'No joint_regressor_post_lbs given for a vertex subset of '
+                f'{len(vertex_subset)} vertices. Using an interpolated approximation of the '
+                f'full joint regressor. For best accuracy, train one with '
+                f'smplfitter.decimation.make_post_lbs_joint_regressors.train_post_lbs_regressor.',
+                stacklevel=3,
+            )
+            joint_regressor_post_lbs = transfer_joint_regressor(
+                res['J_regressor'], v_template_rest, vertex_subset
+            )
 
     return ModelData(
         v_template=res['v_template'][vertex_subset],
@@ -427,6 +439,36 @@ def initialize(
         vertex_subset=vertex_subset,
         joint_names=_JOINT_NAMES_BY_MODEL.get(model_name, []),
     )
+
+
+def transfer_joint_regressor(J_regressor, template, vertex_subset, k=8):
+    """Approximate a joint regressor on a vertex subset from the full-mesh regressor.
+
+    Each vertex in the support of ``J_regressor`` is expressed as an inverse-square-distance
+    weighted combination of its ``k`` nearest subset vertices on the rest template, and its
+    regressor weight is distributed over them accordingly. This keeps the semantics of the
+    original regressor (a ring of surface vertices around each joint). Simply slicing the
+    regressor columns to the subset would drop most of each joint's support.
+
+    Args:
+        J_regressor: (num_joints, num_vertices) regressor of the full mesh.
+        template: (num_vertices, 3) rest template.
+        vertex_subset: (num_subset,) indices of the subset vertices.
+        k: Number of nearest subset vertices per support vertex.
+
+    Returns:
+        (num_joints, num_subset) regressor.
+    """
+    support = np.flatnonzero(np.any(J_regressor != 0, axis=0))
+    k = min(k, len(vertex_subset))
+    diff = template[support, np.newaxis] - template[np.newaxis, vertex_subset]
+    sq_dist = np.sum(diff**2, axis=-1)  # (num_support, num_subset)
+    i_nearest = np.argpartition(sq_dist, k - 1, axis=1)[:, :k]
+    weights = 1.0 / (np.take_along_axis(sq_dist, i_nearest, axis=1) + 1e-12)
+    weights /= np.sum(weights, axis=1, keepdims=True)
+    interpolation = np.zeros_like(sq_dist)
+    np.put_along_axis(interpolation, i_nearest, weights, axis=1)
+    return J_regressor[:, support] @ interpolation
 
 
 @contextlib.contextmanager
