@@ -759,10 +759,6 @@ class BodyFitter:
             A = jac_pos_both
 
         b = target_both - pos_both
-        mean_A = np.mean(A, axis=1, keepdims=True)
-        mean_b = np.mean(b, axis=1, keepdims=True)
-        A = A - mean_A
-        b = b - mean_b
 
         if target_joints is not None and vertex_weights is not None and joint_weights is not None:
             weights = np.concatenate([vertex_weights, joint_weights], axis=1)
@@ -770,6 +766,20 @@ class BodyFitter:
             weights = vertex_weights
         else:
             weights = np.ones(A.shape[:2], dtype=np.float32)
+
+        # Centering with the weighted means makes the translation (eliminated here and
+        # recovered from the means below) the weighted least-squares solution.
+        w_sum = np.sum(weights, axis=1, keepdims=True)
+        w_sum = np.where(w_sum == 0, np.ones_like(w_sum), w_sum)
+        mean_A = (
+            np.sum(weights[..., np.newaxis, np.newaxis] * A, axis=1, keepdims=True)
+            / (w_sum[..., np.newaxis, np.newaxis])
+        )
+        mean_b = (
+            np.sum(weights[..., np.newaxis] * b, axis=1, keepdims=True) / w_sum[..., np.newaxis]
+        )
+        A = A - mean_A
+        b = b - mean_b
 
         n_params = (
             self.n_betas + (1 if self.enable_kid else 0) + (1 if scale_target or scale_fit else 0)
