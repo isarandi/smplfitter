@@ -28,9 +28,11 @@ class BodyFitter(nn.Module):
 
     * The first rotation estimate uses joints regressed from the target vertices and from
       the template mesh, even when target joints are given. Later iterations use the
-      given target joints. This lowered the mean vertex error by 0.02-0.2 mm.
+      given target joints. On noisy targets this lowered the mean vertex error by
+      0.003-0.2 mm with 3 iterations and by 0.3-12 mm with 1 iteration (on noise-free
+      targets with 1 iteration it raised it by 1.1 mm).
     * The final adjustment of the limb orientations (``final_adjust_rots``) ignores the
-      vertex and joint weights. Weighting it raised the mean vertex error by 0.1-0.7 mm,
+      vertex and joint weights. Weighting it raised the mean vertex error by 0.02-0.7 mm,
       for weights ``uncertainty ** -p`` with p from 1 to 2, also when the uncertainties
       were exactly calibrated. The weights still apply to all other steps.
     """
