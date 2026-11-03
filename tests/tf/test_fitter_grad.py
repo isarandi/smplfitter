@@ -65,11 +65,14 @@ def test_fitter_grad_vs_finite_diff(seed):
     bm, target_v, target_j = _make_targets('smpl', batch_size=1, seed=seed)
     fitter = smpl_tf.BodyFitter(bm)
 
+    # Two iterations: with one, the target joints enter only the shape solve and the final
+    # adjustment (the first rotation estimate uses regressed joints), so the directional
+    # derivative is small and the finite difference is dominated by float32 rounding.
     def loss_fn(tv_np, tj_np):
         fit = fitter.fit(
             target_vertices=tf.constant(tv_np),
             target_joints=tf.constant(tj_np),
-            num_iter=1,
+            num_iter=2,
             beta_regularizer=1.0,
             requested_keys=['pose_rotvecs', 'shape_betas', 'trans'],
         )
@@ -81,7 +84,7 @@ def test_fitter_grad_vs_finite_diff(seed):
         fit = fitter.fit(
             target_vertices=tv,
             target_joints=tj,
-            num_iter=1,
+            num_iter=2,
             beta_regularizer=1.0,
             requested_keys=['pose_rotvecs', 'shape_betas', 'trans'],
         )

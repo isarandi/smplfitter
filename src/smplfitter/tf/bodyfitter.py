@@ -234,9 +234,8 @@ class BodyFitter:
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
 
-        # Center targets for numerical stability
         target_vertices, target_joints, target_mean = self._center_targets(
-            target_vertices, target_joints, vertex_weights, joint_weights
+            target_vertices, target_joints
         )
 
         # Initialize global rotations
@@ -310,8 +309,6 @@ class BodyFitter:
                 target_vertices,
                 target_joints,
                 result,
-                vertex_weights,
-                joint_weights,
                 glob_rotmats,
                 scale_target,
                 scale_fit,
@@ -358,7 +355,7 @@ class BodyFitter:
             requested_keys = []
 
         target_vertices, target_joints, target_mean = self._center_targets(
-            target_vertices, target_joints, vertex_weights, joint_weights
+            target_vertices, target_joints
         )
 
         glob_rotmats = self._rotvecs_to_global_rotmats(pose_rotvecs)
@@ -418,7 +415,7 @@ class BodyFitter:
         shape_betas = shape_betas[:, : self.n_betas]
 
         target_vertices, target_joints, target_mean = self._center_targets(
-            target_vertices, target_joints, vertex_weights, joint_weights
+            target_vertices, target_joints
         )
 
         # Initialize from shape
@@ -470,6 +467,8 @@ class BodyFitter:
 
         # Final rotation adjustment
         if final_adjust_rots:
+            # Unweighted on purpose: weighting this step made the fits less accurate
+            # (see smplfitter.pt.BodyFitter).
             if scale_fit and scale_corr is not None:
                 factor = scale_corr[:, tf.newaxis, tf.newaxis]
                 ref_verts = factor * result['vertices'] + trans[:, tf.newaxis]
@@ -483,8 +482,8 @@ class BodyFitter:
                 target_joints,
                 ref_verts,
                 ref_joints,
-                vertex_weights,
-                joint_weights,
+                None,
+                None,
                 glob_rotmats,
                 shape_betas,
                 scale_corr[:, tf.newaxis, tf.newaxis]
@@ -516,29 +515,17 @@ class BodyFitter:
         self,
         target_vertices: tf.Tensor,
         target_joints: Optional[tf.Tensor],
-        vertex_weights: Optional[tf.Tensor],
-        joint_weights: Optional[tf.Tensor],
     ) -> tuple[tf.Tensor, Optional[tf.Tensor], tf.Tensor]:
-        """Subtract weighted mean for numerical stability."""
+        """Subtract the mean for numerical stability."""
         if target_joints is None:
-            if vertex_weights is not None:
-                w = vertex_weights[:, :, tf.newaxis]
-                target_mean = tf.reduce_sum(target_vertices * w, axis=1) / tf.reduce_sum(w, axis=1)
-            else:
-                target_mean = tf.reduce_mean(target_vertices, axis=1)
+            target_mean = tf.reduce_mean(target_vertices, axis=1)
             return target_vertices - target_mean[:, tf.newaxis], None, target_mean
-        else:
-            combined = tf.concat([target_vertices, target_joints], axis=1)
-            if vertex_weights is not None and joint_weights is not None:
-                w = tf.concat([vertex_weights, joint_weights], axis=1)[:, :, tf.newaxis]
-                target_mean = tf.reduce_sum(combined * w, axis=1) / tf.reduce_sum(w, axis=1)
-            else:
-                target_mean = tf.reduce_mean(combined, axis=1)
-            return (
-                target_vertices - target_mean[:, tf.newaxis],
-                target_joints - target_mean[:, tf.newaxis],
-                target_mean,
-            )
+        target_mean = tf.reduce_mean(tf.concat([target_vertices, target_joints], axis=1), axis=1)
+        return (
+            target_vertices - target_mean[:, tf.newaxis],
+            target_joints - target_mean[:, tf.newaxis],
+            target_mean,
+        )
 
     def _rotvecs_to_global_rotmats(self, pose_rotvecs: tf.Tensor) -> tf.Tensor:
         """Convert rotation vectors to global rotation matrices."""
@@ -589,11 +576,14 @@ class BodyFitter:
                 @ initial_forw['orientations']
             )
         else:
+            # Without an initial pose, the first estimate uses joints regressed from the target
+            # vertices and from the template mesh, also when target joints are given (see
+            # smplfitter.pt.BodyFitter for why).
             return self._fit_global_rotations(
                 target_vertices,
                 target_joints,
                 self.default_mesh_tf[tf.newaxis],
-                self.body_model.J_template[tf.newaxis],
+                None,
                 vertex_weights,
                 joint_weights,
             )
@@ -603,13 +593,15 @@ class BodyFitter:
         target_vertices: tf.Tensor,
         target_joints: Optional[tf.Tensor],
         shape_result: dict[str, tf.Tensor],
-        vertex_weights: Optional[tf.Tensor],
-        joint_weights: Optional[tf.Tensor],
         glob_rotmats: tf.Tensor,
         scale_target: bool,
         scale_fit: bool,
     ) -> tf.Tensor:
-        """Final sequential rotation refinement."""
+        """Final sequential rotation refinement.
+
+        Unweighted on purpose: weighting this step made the fits less accurate (see
+        smplfitter.pt.BodyFitter).
+        """
         ref_verts = shape_result['vertices']
         ref_joints = shape_result['joints']
         ref_shape = shape_result['shape_betas']
@@ -624,8 +616,8 @@ class BodyFitter:
                 target_joints * factor if target_joints is not None else None,
                 ref_verts,
                 ref_joints,
-                vertex_weights,
-                joint_weights,
+                None,
+                None,
                 glob_rotmats,
                 ref_shape,
                 None,
@@ -639,8 +631,8 @@ class BodyFitter:
                 target_joints,
                 factor * ref_verts + (1 - factor) * ref_trans[:, tf.newaxis],
                 factor * ref_joints + (1 - factor) * ref_trans[:, tf.newaxis],
-                vertex_weights,
-                joint_weights,
+                None,
+                None,
                 glob_rotmats,
                 ref_shape,
                 factor,
@@ -653,8 +645,8 @@ class BodyFitter:
                 target_joints,
                 ref_verts,
                 ref_joints,
-                vertex_weights,
-                joint_weights,
+                None,
+                None,
                 glob_rotmats,
                 ref_shape,
                 None,
