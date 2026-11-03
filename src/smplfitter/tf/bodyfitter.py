@@ -371,7 +371,6 @@ class BodyFitter:
             joint_weights,
             beta_regularizer,
             beta_regularizer2,
-            beta_regularizer2,
             scale_regularizer,
             kid_regularizer,
             share_beta,
@@ -415,6 +414,8 @@ class BodyFitter:
         """Fit pose and translation with known shape."""
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
+
+        shape_betas = shape_betas[:, : self.n_betas]
 
         target_vertices, target_joints, target_mean = self._center_targets(
             target_vertices, target_joints, vertex_weights, joint_weights
