@@ -445,6 +445,7 @@ SETTINGS = {
     'nojoints_weights_iter3': dict(joints=False, weights=True, num_iter=3),
     'nojoints_noweights_iter1': dict(joints=False, weights=False, num_iter=1),
     'joints_weights_scale_target': dict(joints=True, weights=True, num_iter=2, scale_target=True),
+    'joints_weights_scale_fit': dict(joints=True, weights=True, num_iter=2, scale_fit=True),
 }
 
 
@@ -516,9 +517,12 @@ def _fit_vertices(
     vertices = np_model(
         pose_rotvecs=fit['pose_rotvecs'], shape_betas=fit['shape_betas'], trans=fit['trans']
     )['vertices']
-    if 'scale_corr' in fit:
-        # scale_target: the fit matches the target scaled by scale_corr
+    if s.get('scale_target'):
+        # The fit matches the target scaled by scale_corr.
         vertices = vertices / fit['scale_corr'][:, None, None]
+    elif s.get('scale_fit'):
+        # The fit scaled by scale_corr matches the target.
+        vertices = vertices * fit['scale_corr'][:, None, None]
     return vertices
 
 

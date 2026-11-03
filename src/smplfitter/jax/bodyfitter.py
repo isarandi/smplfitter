@@ -872,8 +872,10 @@ class BodyFitter:
             new_scale_corr = x[:, -1] + 1
             if scale_fit and new_scale_corr is not None:
                 new_shape = new_shape / new_scale_corr[:, None]
+                result['shape_betas'] = new_shape
                 if new_kid_factor is not None:
                     new_kid_factor = new_kid_factor / new_scale_corr
+                    result['kid_factor'] = new_kid_factor
             result['scale_corr'] = new_scale_corr
         else:
             new_scale_corr = None
