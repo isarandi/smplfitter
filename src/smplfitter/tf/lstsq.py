@@ -4,6 +4,8 @@ from typing import Optional
 
 import tensorflow as tf
 
+from .util import batched_matmul
+
 
 def lstsq(
     matrix: tf.Tensor,
@@ -31,8 +33,8 @@ def lstsq(
         Solution x, shape (batch, n_params, n_outputs), or (1, n_params, n_outputs) if shared.
     """
     weighted_matrix = weights[..., tf.newaxis] * matrix
-    regularized_gramian = tf.linalg.matmul(weighted_matrix, matrix, transpose_a=True)
-    ATb = tf.linalg.matmul(weighted_matrix, rhs, transpose_a=True)
+    regularized_gramian = batched_matmul(weighted_matrix, matrix, transpose_a=True)
+    ATb = batched_matmul(weighted_matrix, rhs, transpose_a=True)
     if l2_regularizer is not None:
         regularized_gramian += tf.linalg.diag(l2_regularizer)
         if l2_regularizer_reference is not None:

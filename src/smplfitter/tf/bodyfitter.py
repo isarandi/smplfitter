@@ -848,17 +848,20 @@ class BodyFitter:
                 [shape_for_output, result['kid_factor'][:, tf.newaxis]], axis=1
             )
 
+        # Elementwise, not einsum: the gradient of an einsum here would be a matrix product over
+        # all vertex coordinates, see batched_matmul.
+        shape_expanded = shape_for_output[:, tf.newaxis, tf.newaxis]
         if 'joints' in requested_keys:
             result['joints'] = (
                 glob_positions_ext[..., 0]
-                + tf.einsum('bvcs,bs->bvc', glob_positions_ext[..., 1:], shape_for_output)
+                + tf.reduce_sum(glob_positions_ext[..., 1:] * shape_expanded, axis=-1)
                 + new_trans[:, tf.newaxis]
             )
 
         if 'vertices' in requested_keys:
             result['vertices'] = (
                 v_posed_ext[..., 0]
-                + tf.einsum('bvcs,bs->bvc', v_posed_ext[..., 1:], shape_for_output)
+                + tf.reduce_sum(v_posed_ext[..., 1:] * shape_expanded, axis=-1)
                 + new_trans[:, tf.newaxis]
             )
 
