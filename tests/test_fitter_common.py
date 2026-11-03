@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import pytest
@@ -460,6 +460,23 @@ def test_fit_matches_numpy_backend(fitter_backend: Backend, setting: str):
     ), f'{fitter_backend.name}: max vertex diff {max_diff * 1000:.3f} mm'
 
 
+@pytest.mark.parametrize('batch_size', [2, 3, 6])
+def test_fit_does_not_depend_on_batch_size(fitter_backend: Backend, batch_size: int):
+    """Each batch element gets the fit it would get alone (up to rounding).
+
+    Batched linear algebra kernels can fail only above a certain batch or matrix size, which
+    a comparison of one batch size across backends does not necessarily reveal.
+    """
+    setting = 'joints_weights_iter3'
+    batched = _fit_vertices(fitter_backend, setting, batch_size)
+    for i in range(batch_size):
+        alone = _fit_vertices(fitter_backend, setting, 1, first=i)
+        max_diff = np.max(np.linalg.norm(batched[i] - alone[0], axis=-1))
+        assert (
+            max_diff < TOLERANCE_M
+        ), f'{fitter_backend.name}: element {i} differs by {max_diff * 1000:.3f} mm'
+
+
 @functools.lru_cache
 def _numpy_fit_vertices(setting: str) -> np.ndarray:
     from conftest import _make_np_backend
@@ -467,14 +484,20 @@ def _numpy_fit_vertices(setting: str) -> np.ndarray:
     return _fit_vertices(_make_np_backend(), setting)
 
 
-def _fit_vertices(backend: Backend, setting: str) -> np.ndarray:
-    """Vertices (B, V, 3) of the bodies fitted by the backend, posed by the NumPy model."""
+def _fit_vertices(
+    backend: Backend, setting: str, batch_size: Optional[int] = None, first: int = 0
+) -> np.ndarray:
+    """Vertices (B, V, 3) of the bodies fitted by the backend, posed by the NumPy model.
+
+    Fits ``batch_size`` of the test targets starting at ``first``, or all of them if None.
+    """
     import smplfitter.np
 
     s = dict(SETTINGS[setting])
     use_joints = s.pop('joints')
     use_weights = s.pop('weights')
-    verts, joints, vertex_weights, joint_weights = _targets()
+    end = None if batch_size is None else first + batch_size
+    verts, joints, vertex_weights, joint_weights = (x[first:end] for x in _targets())
     model = backend.prepare_model(backend.module.BodyModel('smpl', 'neutral', num_betas=10))
     fitter = backend.prepare_fitter(backend.module.BodyFitter(model))
     t = backend.to_tensor

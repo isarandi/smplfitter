@@ -54,6 +54,42 @@ def test_fitter_grad_finite(model_name, num_iter):
         assert np.abs(arr).max() > 0, f'{name} grad is all-zero'
 
 
+@pytest.mark.parametrize('model_name', ['smpl', 'smplx'])
+@pytest.mark.parametrize('num_iter', [1, 3])
+def test_fitter_grad_of_batch_matches_single_elements(model_name, num_iter):
+    """The gradient of a batched fit must equal the gradients of the elements fitted alone.
+
+    A failing batched kernel in the backward pass can give finite but wrong gradients, which
+    only a comparison of values reveals. The loss is linear in the rotation vectors, so that
+    identity rotations (the SMPL toes follow the feet) also receive a non-zero upstream gradient.
+    """
+    batch_size = 3
+    bm, target_v, target_j = _make_targets(model_name, batch_size=batch_size)
+    fitter = smpl_tf.BodyFitter(bm)
+    loss_weights = np.random.default_rng(0).normal(size=(batch_size, bm.num_joints * 3))
+    loss_weights = tf.constant(loss_weights.astype(np.float32))
+
+    def gradient(indices):
+        tv = tf.Variable(target_v[indices])
+        tj = tf.Variable(target_j[indices])
+        with tf.GradientTape() as tape:
+            fit = fitter.fit(
+                target_vertices=tv,
+                target_joints=tj,
+                num_iter=num_iter,
+                beta_regularizer=1.0,
+                requested_keys=['pose_rotvecs'],
+            )
+            loss = tf.reduce_sum(fit['pose_rotvecs'] * tf.gather(loss_weights, indices))
+        return tape.gradient(loss, tv).numpy()
+
+    batched = gradient(list(range(batch_size)))
+    for i in range(batch_size):
+        alone = gradient([i])[0]
+        rel = np.max(np.abs(batched[i] - alone)) / np.max(np.abs(alone))
+        assert rel < 1e-2, f'element {i}: relative gradient difference {rel:.2e}'
+
+
 @pytest.mark.parametrize('seed', [0, 1, 2])
 def test_fitter_grad_vs_finite_diff(seed):
     """Directional finite-difference check on the SMPL fit gradient.

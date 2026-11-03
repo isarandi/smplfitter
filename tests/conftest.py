@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, ContextManager, Optional
@@ -74,6 +75,24 @@ def _make_np_backend() -> Backend:
     )
 
 
+def _make_tf_backend() -> Backend:
+    """Create TensorFlow backend."""
+    import tensorflow as tf
+
+    import smplfitter.tf as module
+
+    return Backend(
+        name='tf',
+        module=module,
+        to_tensor=tf.constant,
+        to_numpy=lambda x: np.asarray(x),
+        prepare_model=lambda m: m,
+        prepare_fitter=lambda f: f,
+        context=nullcontext,
+        num_betas_on_model=True,
+    )
+
+
 def _make_jax_backend() -> Optional[Backend]:
     """Create JAX backend if available."""
     try:
@@ -99,6 +118,7 @@ _BACKEND_FACTORIES = {
     'pt': _make_pt_backend,
     'nb': _make_nb_backend,
     'np': _make_np_backend,
+    'tf': _make_tf_backend,
     'jax': _make_jax_backend,
 }
 
@@ -119,6 +139,12 @@ def _get_available_backends() -> list[str]:
     # NumPy and Numba are always available (dependencies)
     available.append('nb')
     available.append('np')
+
+    # TensorFlow and PyTorch cannot share a GPU in one process: torch.linalg.svd segfaults once
+    # both have initialized CUDA. Run the TensorFlow backend with CUDA_VISIBLE_DEVICES=-1; it then
+    # replaces 'pt' here, and both are compared through the NumPy reference.
+    if 'pt' not in available and importlib.util.find_spec('tensorflow') is not None:
+        available.append('tf')
 
     # Check JAX
     try:
@@ -141,7 +167,7 @@ def backend(request) -> Backend:
     return result
 
 
-@pytest.fixture(params=['pt', 'nb', 'np', 'jax'], ids=lambda x: x)
+@pytest.fixture(params=['pt', 'nb', 'np', 'tf', 'jax'], ids=lambda x: x)
 def fitter_backend(request) -> Backend:
     """Fixture for backends that have BodyFitter."""
     if request.param not in _get_available_backends():
