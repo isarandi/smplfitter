@@ -227,7 +227,7 @@ class BodyFitter:
         initial_pose_rotvecs: Optional[tf.Tensor] = None,
         initial_shape_betas: Optional[tf.Tensor] = None,
         initial_kid_factor: Optional[tf.Tensor] = None,
-        allow_nan: bool = False,
+        allow_nan: bool = True,
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, tf.Tensor]:
         """Fit body model to target vertices and optionally joints.
@@ -236,6 +236,9 @@ class BodyFitter:
         about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
         target``; with ``scale_target``, ``BM(pose, betas, trans) = scale_corr *
         target``.
+
+        With ``allow_nan=False``, NaN values in the result are replaced by zeros, which also
+        hides failed fits.
         """
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
@@ -353,7 +356,7 @@ class BodyFitter:
         scale_fit: bool = False,
         beta_regularizer_reference: Optional[tf.Tensor] = None,
         kid_regularizer_reference: Optional[tf.Tensor] = None,
-        allow_nan: bool = False,
+        allow_nan: bool = True,
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, tf.Tensor]:
         """Fit shape and translation with known pose.
@@ -417,7 +420,7 @@ class BodyFitter:
         final_adjust_rots: bool = True,
         initial_pose_rotvecs: Optional[tf.Tensor] = None,
         scale_fit: bool = False,
-        allow_nan: bool = False,
+        allow_nan: bool = True,
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, tf.Tensor]:
         """Fit pose and translation with known shape.

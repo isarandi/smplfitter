@@ -771,3 +771,18 @@ def _scale_targets(mode: str, kid: bool = False, share_beta: bool = False, scale
     if mode == 'scale_target':
         factor = 1 / factor
     return res['vertices'] * factor, res['joints'] * factor, pose, betas
+
+
+def test_tf_keeps_nan_by_default(fitter_backend: Backend):
+    """A failed TF fit shows up as NaN, unless zeros are requested with allow_nan=False."""
+    if fitter_backend.name != 'tf':
+        pytest.skip('allow_nan exists only in the TF backend')
+    _, fitter = _make_model_and_fitter(fitter_backend)
+    target_v, target_j, _, _ = _scale_targets('scale_fit')
+    target_v[1, 100] = np.nan
+    t = fitter_backend.to_tensor
+    fit = fitter.fit(t(target_v), t(target_j), requested_keys=['pose_rotvecs'])
+    assert np.all(np.isnan(fitter_backend.to_numpy(fit['trans'])[1]))
+    assert np.all(np.isfinite(fitter_backend.to_numpy(fit['trans'])[0]))
+    zeroed = fitter.fit(t(target_v), t(target_j), allow_nan=False, requested_keys=['pose_rotvecs'])
+    assert np.all(fitter_backend.to_numpy(zeroed['trans'])[1] == 0)
