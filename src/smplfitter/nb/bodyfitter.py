@@ -111,7 +111,13 @@ class BodyFitter:
         initial_kid_factor: Optional[np.ndarray] = None,
         requested_keys: Optional[tuple] = None,
     ) -> dict:
-        """Fits the body model to target vertices and optionally joints."""
+        """Fits the body model to target vertices and optionally joints.
+
+        The returned ``trans`` belongs to ``BM(pose, betas, trans)``, and ``scale_corr`` scales
+        about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
+        target``; with ``scale_target``, ``BM(pose, betas, trans) = scale_corr *
+        target``.
+        """
         if requested_keys is None:
             requested_keys = ('pose_rotvecs',)
 
@@ -288,13 +294,9 @@ class BodyFitter:
                     ref_kid_factor,
                 )
 
-        # Add mean back (scaled appropriately if using scale correction)
-        if scale_target and ref_scale_corr is not None:
-            result['trans'] = ref_trans + target_mean * ref_scale_corr[:, np.newaxis]
-        elif scale_fit and ref_scale_corr is not None:
-            result['trans'] = ref_trans + target_mean / ref_scale_corr[:, np.newaxis]
-        else:
-            result['trans'] = ref_trans + target_mean
+        result['trans'] = _uncentered_trans(
+            ref_trans, target_mean, ref_scale_corr, scale_target, scale_fit
+        )
 
         result['orientations'] = glob_rotmats
 
@@ -335,7 +337,13 @@ class BodyFitter:
         kid_regularizer_reference: Optional[np.ndarray] = None,
         requested_keys: tuple = (),
     ) -> dict[str, np.ndarray]:
-        """Fits the body shape and translation with known output pose."""
+        """Fits the body shape and translation with known output pose.
+
+        The returned ``trans`` belongs to ``BM(pose, betas, trans)``, and ``scale_corr`` scales
+        about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
+        target``; with ``scale_target``, ``BM(pose, betas, trans) = scale_corr *
+        target``.
+        """
         # Subtract mean for numerical stability
         if target_joints is None:
             target_mean = np.mean(target_vertices, axis=1)
@@ -366,7 +374,9 @@ class BodyFitter:
             kid_regularizer_reference=kid_regularizer_reference,
         )
 
-        result['trans'] = result['trans'] + target_mean
+        result['trans'] = _uncentered_trans(
+            result['trans'], target_mean, result.get('scale_corr'), scale_target, scale_fit
+        )
         result.pop('vertices', None)
         result.pop('joints', None)
         result.pop('relative_orientations', None)
@@ -386,7 +396,12 @@ class BodyFitter:
         scale_fit: bool = False,
         requested_keys: tuple = (),
     ) -> dict[str, np.ndarray]:
-        """Fits the body pose and translation with known shape parameters."""
+        """Fits the body pose and translation with known shape parameters.
+
+        The returned ``trans`` belongs to ``BM(pose, betas, trans)``, and ``scale_corr`` scales
+        about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
+        target``.
+        """
         if not requested_keys:
             requested_keys = ('pose_rotvecs',)
 
@@ -512,7 +527,7 @@ class BodyFitter:
         # Build result
         result: dict[str, np.ndarray] = {
             'shape_betas': shape_betas,
-            'trans': trans + target_mean,
+            'trans': _uncentered_trans(trans, target_mean, ref_scale_corr, False, scale_fit),
             'orientations': glob_rotmats,
         }
         if kid_factor is not None:
@@ -807,6 +822,27 @@ class BodyFitter:
             self.toe_copy_pairs,
             self.refine_joints,
         )
+
+
+def _uncentered_trans(
+    trans: np.ndarray,
+    target_mean: np.ndarray,
+    scale_corr: Optional[np.ndarray],
+    scale_target: bool,
+    scale_fit: bool,
+) -> np.ndarray:
+    """Translation for ``BM(pose, betas, trans)`` from that of the fit to the centered targets.
+
+    With V the model at zero translation and t the translation found for the targets centered
+    at c, the fit gives ``V + t = s * (target - c)`` with scale_target and
+    ``s * V + t = target - c`` with scale_fit. Rearranged to the rule stated in
+    :meth:`BodyFitter.fit`, these give ``t + s * c`` and ``(t + c) / s``.
+    """
+    if scale_target and scale_corr is not None:
+        return trans + target_mean * scale_corr[:, np.newaxis]
+    if scale_fit and scale_corr is not None:
+        return (trans + target_mean) / scale_corr[:, np.newaxis]
+    return trans + target_mean
 
 
 def fit_scale_and_translation(

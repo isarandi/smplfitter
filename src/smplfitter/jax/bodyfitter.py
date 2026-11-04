@@ -219,15 +219,21 @@ class BodyFitter:
             kid_regularizer: Regularization for kid blendshape factor.
             share_beta: If True, shares shape parameters across batch.
             final_adjust_rots: Whether to refine body part orientations after fitting.
-            scale_target: If True, estimates scale factor for target vertices.
-            scale_fit: If True, estimates scale factor for fitted mesh.
+            scale_target: If True, estimates ``scale_corr`` so that
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
+                origin.
+            scale_fit: If True, estimates ``scale_corr`` so that
+                ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
+                world origin.
             initial_pose_rotvecs: Optional initial pose rotations.
             initial_shape_betas: Optional initial shape parameters.
             initial_kid_factor: Optional initial kid factor.
             requested_keys: List of keys specifying which results to return.
 
         Returns:
-            Dictionary with fitted parameters (pose_rotvecs, shape_betas, trans, etc.)
+            Dictionary with fitted parameters (pose_rotvecs, shape_betas, trans, etc.). ``trans``
+            is the ``trans`` of ``BM(pose, betas, trans)``. ``scale_corr`` is the scale factor as
+            defined by ``scale_target`` and ``scale_fit``, if one of them is True.
         """
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
@@ -389,13 +395,9 @@ class BodyFitter:
                     ref_kid_factor,
                 )
 
-        # Add the mean back (scaled appropriately if using scale correction)
-        if scale_target:
-            result['trans'] = ref_trans + target_mean * result['scale_corr'][:, None]
-        elif scale_fit:
-            result['trans'] = ref_trans + target_mean / result['scale_corr'][:, None]
-        else:
-            result['trans'] = ref_trans + target_mean
+        result['trans'] = _uncentered_trans(
+            ref_trans, target_mean, result.get('scale_corr'), scale_target, scale_fit
+        )
         result['orientations'] = glob_rotmats
 
         # Provide other requested rotation formats
@@ -450,14 +452,20 @@ class BodyFitter:
             scale_regularizer: Regularization for scale factor.
             kid_regularizer: Regularization for kid blendshape factor.
             share_beta: Whether to share shape parameters across batch.
-            scale_target: Whether to estimate scale factor for target vertices.
-            scale_fit: Whether to estimate scale factor for fitted mesh.
+            scale_target: If True, estimates ``scale_corr`` so that
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
+                origin.
+            scale_fit: If True, estimates ``scale_corr`` so that
+                ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
+                world origin.
             beta_regularizer_reference: Reference values for beta regularization.
             kid_regularizer_reference: Reference values for kid factor regularization.
             requested_keys: List of result keys to return.
 
         Returns:
             Dictionary with shape_betas, trans, and optionally kid_factor and scale_corr.
+            ``trans`` is the ``trans`` of ``BM(pose, betas, trans)``. ``scale_corr`` is the scale
+            factor as defined by ``scale_target`` and ``scale_fit``.
         """
         if requested_keys is None:
             requested_keys = []
@@ -500,8 +508,9 @@ class BodyFitter:
             kid_regularizer_reference=kid_regularizer_reference,
         )
 
-        # Add mean back to translation
-        result['trans'] = result['trans'] + target_mean
+        result['trans'] = _uncentered_trans(
+            result['trans'], target_mean, result.get('scale_corr'), scale_target, scale_fit
+        )
 
         # Remove intermediate results
         result.pop('vertices', None)
@@ -536,11 +545,15 @@ class BodyFitter:
             num_iter: Number of optimization iterations.
             final_adjust_rots: Whether to refine body part orientations after fitting.
             initial_pose_rotvecs: Optional initial pose rotations.
-            scale_fit: Whether to estimate scale factor for fitted mesh.
+            scale_fit: If True, estimates ``scale_corr`` so that
+                ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
+                world origin.
             requested_keys: List of result keys to return.
 
         Returns:
             Dictionary with pose_rotvecs, trans, orientations, and optionally scale_corr.
+            ``trans`` is the ``trans`` of ``BM(pose, betas, trans)``. ``scale_corr`` is the scale
+            factor as defined by ``scale_fit``.
         """
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
@@ -651,8 +664,7 @@ class BodyFitter:
                     kid_factor,
                 )
 
-        # Add mean back to translation
-        final_trans = ref_trans + target_mean
+        final_trans = _uncentered_trans(ref_trans, target_mean, ref_scale_corr, False, scale_fit)
 
         result_out: dict[str, jnp.ndarray] = {
             'orientations': glob_rotmats,
@@ -1107,6 +1119,27 @@ class BodyFitter:
             glob_rots.append(glob_rot)
 
         return jnp.stack(glob_rots, axis=1)
+
+
+def _uncentered_trans(
+    trans: jnp.ndarray,
+    target_mean: jnp.ndarray,
+    scale_corr: Optional[jnp.ndarray],
+    scale_target: bool,
+    scale_fit: bool,
+) -> jnp.ndarray:
+    """Translation for ``BM(pose, betas, trans)`` from that of the fit to the centered targets.
+
+    With V the model at zero translation and t the translation found for the targets centered
+    at c, the fit gives ``V + t = s * (target - c)`` with scale_target and
+    ``s * V + t = target - c`` with scale_fit. Rearranged to the rule stated in
+    :meth:`BodyFitter.fit`, these give ``t + s * c`` and ``(t + c) / s``.
+    """
+    if scale_target and scale_corr is not None:
+        return trans + target_mean * scale_corr[:, None]
+    if scale_fit and scale_corr is not None:
+        return (trans + target_mean) / scale_corr[:, None]
+    return trans + target_mean
 
 
 def fit_scale_and_translation(

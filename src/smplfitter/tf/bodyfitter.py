@@ -230,7 +230,13 @@ class BodyFitter:
         allow_nan: bool = False,
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, tf.Tensor]:
-        """Fit body model to target vertices and optionally joints."""
+        """Fit body model to target vertices and optionally joints.
+
+        The returned ``trans`` belongs to ``BM(pose, betas, trans)``, and ``scale_corr`` scales
+        about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
+        target``; with ``scale_target``, ``BM(pose, betas, trans) = scale_corr *
+        target``.
+        """
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
 
@@ -350,7 +356,13 @@ class BodyFitter:
         allow_nan: bool = False,
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, tf.Tensor]:
-        """Fit shape and translation with known pose."""
+        """Fit shape and translation with known pose.
+
+        The returned ``trans`` belongs to ``BM(pose, betas, trans)``, and ``scale_corr`` scales
+        about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
+        target``; with ``scale_target``, ``BM(pose, betas, trans) = scale_corr *
+        target``.
+        """
         if requested_keys is None:
             requested_keys = []
 
@@ -380,8 +392,8 @@ class BodyFitter:
         output = self._build_result(
             glob_rotmats,
             result['shape_betas'],
-            result['trans'] + target_mean,
-            tf.zeros_like(target_mean),
+            result['trans'],
+            target_mean,
             result.get('kid_factor'),
             result.get('scale_corr'),
             scale_target,
@@ -408,7 +420,12 @@ class BodyFitter:
         allow_nan: bool = False,
         requested_keys: Optional[list[str]] = None,
     ) -> dict[str, tf.Tensor]:
-        """Fit pose and translation with known shape."""
+        """Fit pose and translation with known shape.
+
+        The returned ``trans`` belongs to ``BM(pose, betas, trans)``, and ``scale_corr`` scales
+        about the world origin: with ``scale_fit``, ``scale_corr * BM(pose, betas, trans) =
+        target``.
+        """
         if requested_keys is None:
             requested_keys = ['pose_rotvecs']
 
@@ -496,8 +513,8 @@ class BodyFitter:
         output = self._build_result(
             glob_rotmats,
             shape_betas,
-            trans + target_mean,
-            tf.zeros_like(target_mean),
+            trans,
+            target_mean,
             kid_factor,
             scale_corr,
             False,
@@ -666,14 +683,19 @@ class BodyFitter:
         scale_fit: bool,
         requested_keys: list[str],
     ) -> dict[str, tf.Tensor]:
-        """Build the output dictionary."""
+        """Build the output dictionary.
+
+        ``trans`` is the translation found for the targets centered at ``target_mean``. With V
+        the model at zero translation, the fit gives ``V + trans = s * (target - target_mean)``
+        with scale_target and ``s * V + trans = target - target_mean`` with scale_fit. Rearranged
+        to the rule stated in :meth:`fit`, the returned translations follow.
+        """
         result: dict[str, tf.Tensor] = {}
 
-        # Compute final translation with mean restored
         if scale_target and scale_corr is not None:
             result['trans'] = trans + target_mean * scale_corr[:, tf.newaxis]
         elif scale_fit and scale_corr is not None:
-            result['trans'] = trans + target_mean / scale_corr[:, tf.newaxis]
+            result['trans'] = (trans + target_mean) / scale_corr[:, tf.newaxis]
         else:
             result['trans'] = trans + target_mean
 

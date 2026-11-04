@@ -341,10 +341,12 @@ class BodyFitter(nn.Module):
                 batch.
             final_adjust_rots: Whether to perform a final refinement of the body part
                 orientations to improve alignment.
-            scale_target: If True, estimates a scale factor to apply to the target vertices for
-                alignment.
-            scale_fit: If True, estimates a scale factor to apply to the fitted mesh for
-                alignment.
+            scale_target: If True, estimates ``scale_corr`` so that
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
+                origin.
+            scale_fit: If True, estimates ``scale_corr`` so that
+                ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
+                world origin.
             initial_pose_rotvecs: Optional initial pose rotations, if a good guess is available.
                 Usually not necessary (experimental).
             initial_shape_betas: Optional initial shape parameters (betas), if a good guess is
@@ -360,13 +362,13 @@ class BodyFitter(nn.Module):
             Dictionary
                 - **pose_rotvecs** -- Estimated pose in concatenated rotation vector format.
                 - **shape_betas** -- Estimated shape parameters (betas).
-                - **trans** -- Estimated translation parameters.
+                - **trans** -- Estimated translation, the ``trans`` of ``BM(pose, betas, trans)``.
                 - **orientations** -- Global body part orientations as rotation matrices.
                 - **relative_orientations** -- Parent-relative body part orientations as rotation \
                     matrices.
                 - **kid_factor** -- Estimated kid blendshape factor, if `enable_kid` is True.
-                - **scale_corr** -- Estimated scale correction factor, if `scale_target` or \
-                    `scale_fit` is True.
+                - **scale_corr** -- Estimated scale factor as defined by `scale_target` and \
+                    `scale_fit`, if one of them is True.
 
         """
 
@@ -542,13 +544,9 @@ class BodyFitter(nn.Module):
                     rotation_projection,
                 )
 
-        # Add the mean back (scaled appropriately if using scale correction)
-        if scale_target:
-            result['trans'] = ref_trans + target_mean * result['scale_corr'][:, None]
-        elif scale_fit:
-            result['trans'] = ref_trans + target_mean / result['scale_corr'][:, None]
-        else:
-            result['trans'] = ref_trans + target_mean
+        result['trans'] = _uncentered_trans(
+            ref_trans, target_mean, result.get('scale_corr'), scale_target, scale_fit
+        )
         result['orientations'] = glob_rotmats
 
         # Provide other requested rotation formats
@@ -650,9 +648,12 @@ class BodyFitter(nn.Module):
             scale_regularizer: Regularization term penalizing deviation of the scale factor from 1.
             kid_regularizer: Regularization weight for the kid blendshape factor.
             share_beta: Whether to share the shape parameters (betas) across instances in the batch.
-            scale_target: Whether to estimate a scale factor for the target vertices to aid
-                alignment.
-            scale_fit: Whether to estimate a scale factor for the fitted mesh to aid alignment.
+            scale_target: If True, estimates ``scale_corr`` so that
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
+                origin.
+            scale_fit: If True, estimates ``scale_corr`` so that
+                ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
+                world origin.
             beta_regularizer_reference: Optional reference values for beta regularization.
             kid_regularizer_reference: Optional reference values for kid factor regularization.
             requested_keys: List of result keys to return.
@@ -660,12 +661,13 @@ class BodyFitter(nn.Module):
         Returns:
             Dictionary
                 - **shape_betas** -- Estimated shape parameters (betas).
-                - **trans** -- Estimated translation parameters.
+                - **trans** -- Estimated translation, the ``trans`` of ``BM(pose, betas, trans)``.
                 - **orientations** -- Global body part orientations as rotation matrices.
                 - **relative_orientations** -- Parent-relative body part orientations as rotation \
                     matrices.
                 - **kid_factor** -- Estimated kid blendshape factor, if enabled.
-                - **scale_corr** -- Estimated scale correction factor, if scaling is enabled.
+                - **scale_corr** -- Estimated scale factor as defined by `scale_target` and \
+                    `scale_fit`, if one of them is True.
 
         """
 
@@ -706,8 +708,9 @@ class BodyFitter(nn.Module):
         # ref_kid_factor = result['kid_factor'] if self.enable_kid else None
         # ref_scale_corr = result['scale_corr'][:, None, None] if scale_target or scale_fit else None
 
-        # Add the mean back
-        result['trans'] = result['trans'] + target_mean
+        result['trans'] = _uncentered_trans(
+            result['trans'], target_mean, result.get('scale_corr'), scale_target, scale_fit
+        )
         if 'vertices' in result:
             result.pop('vertices')
         if 'joints' in result:
@@ -757,8 +760,9 @@ class BodyFitter(nn.Module):
                 alignment.
             initial_pose_rotvecs: Optional initial pose rotations in rotation vector format,
                 shaped as (batch_size, num_joints * 3).
-            scale_fit: Whether to estimate a scale factor to align the fitted mesh with the
-                target vertices.
+            scale_fit: If True, estimates ``scale_corr`` so that
+                ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
+                world origin.
             requested_keys: List of result keys to return.
             rotation_projection: How body part rotations are projected onto SO(3): ``'svd'``
                 (the default, fastest without CUDA graphs) or ``'analytic'`` (closed form, no
@@ -880,8 +884,9 @@ class BodyFitter(nn.Module):
                     rotation_projection=rotation_projection,
                 )
 
-        # Add the mean back
-        result['trans'] = ref_trans + target_mean
+        result['trans'] = _uncentered_trans(
+            ref_trans, target_mean, ref_scale_corr, False, scale_fit
+        )
         result['orientations'] = glob_rotmats
 
         if scale_fit:
@@ -1708,6 +1713,27 @@ def _gram_block(
         sum_b = (b * w.unsqueeze(-1)).sum(dim=1).unsqueeze(-1)
         w_sum = w.sum(dim=1).view(B, 1, 1).to(torch.float64)
     return gram.double(), rhs.double(), sum_A.double(), sum_b.double(), w_sum
+
+
+def _uncentered_trans(
+    trans: torch.Tensor,
+    target_mean: torch.Tensor,
+    scale_corr: Optional[torch.Tensor],
+    scale_target: bool,
+    scale_fit: bool,
+) -> torch.Tensor:
+    """Translation for ``BM(pose, betas, trans)`` from that of the fit to the centered targets.
+
+    With V the model at zero translation and t the translation found for the targets centered
+    at c, the fit gives ``V + t = s * (target - c)`` with scale_target and
+    ``s * V + t = target - c`` with scale_fit. Rearranged to the rule stated in
+    :meth:`BodyFitter.fit`, these give ``t + s * c`` and ``(t + c) / s``.
+    """
+    if scale_target and scale_corr is not None:
+        return trans + target_mean * scale_corr[:, None]
+    if scale_fit and scale_corr is not None:
+        return (trans + target_mean) / scale_corr[:, None]
+    return trans + target_mean
 
 
 def fit_scale_and_translation(

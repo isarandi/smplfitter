@@ -265,6 +265,19 @@ correct for this.
 This mode is incompatible with ``share_beta=True`` because it creates a
 nonlinear coupling between scale and shape.
 
+**What the results mean.** One rule holds in :meth:`~smplfitter.pt.BodyFitter.fit`,
+:meth:`~smplfitter.pt.BodyFitter.fit_with_known_pose` and
+:meth:`~smplfitter.pt.BodyFitter.fit_with_known_shape`: the returned ``trans`` is the
+translation of ``BM(pose, betas, trans)``, and ``scale_corr`` scales about the world origin.
+
+- With ``scale_fit=True``: ``scale_corr * BM(pose, betas, trans) ≈ target``
+- With ``scale_target=True``: ``BM(pose, betas, trans) ≈ scale_corr * target``
+
+Forward the returned values through the model, then apply ``scale_corr`` as above. Returned
+``vertices`` and ``joints`` (NumPy backend) are ``BM(pose, betas, trans)``, without
+``scale_corr``. The betas are confounded with the scale, so with a free scale they
+can differ from the true betas even for perfect input.
+
 
 Flip Body Parameters Left-Right
 --------------------------------

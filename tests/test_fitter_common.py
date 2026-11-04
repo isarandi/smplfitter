@@ -446,6 +446,15 @@ SETTINGS = {
     'nojoints_noweights_iter1': dict(joints=False, weights=False, num_iter=1),
     'joints_weights_scale_target': dict(joints=True, weights=True, num_iter=2, scale_target=True),
     'joints_weights_scale_fit': dict(joints=True, weights=True, num_iter=2, scale_fit=True),
+    'known_pose_scale_target': dict(
+        method='fit_with_known_pose', joints=True, weights=True, scale_target=True
+    ),
+    'known_pose_scale_fit': dict(
+        method='fit_with_known_pose', joints=True, weights=True, scale_fit=True
+    ),
+    'known_shape_scale_fit': dict(
+        method='fit_with_known_shape', joints=True, weights=True, num_iter=2, scale_fit=True
+    ),
 }
 
 
@@ -490,32 +499,48 @@ def _fit_vertices(
 ) -> np.ndarray:
     """Vertices (B, V, 3) of the bodies fitted by the backend, posed by the NumPy model.
 
-    Fits ``batch_size`` of the test targets starting at ``first``, or all of them if None.
+    The vertices are in the frame of the targets. Fits ``batch_size`` of the test targets
+    starting at ``first``, or all of them if None.
     """
     import smplfitter.np
 
     s = dict(SETTINGS[setting])
+    method = s.pop('method', 'fit')
     use_joints = s.pop('joints')
     use_weights = s.pop('weights')
     end = None if batch_size is None else first + batch_size
-    verts, joints, vertex_weights, joint_weights = (x[first:end] for x in _targets())
+    verts, joints, vertex_weights, joint_weights, pose, betas = (x[first:end] for x in _targets())
     model = backend.prepare_model(backend.module.BodyModel('smpl', 'neutral', num_betas=10))
     fitter = backend.prepare_fitter(backend.module.BodyFitter(model))
     t = backend.to_tensor
+    inputs = (
+        t(verts),
+        t(joints) if use_joints else None,
+        t(vertex_weights) if use_weights else None,
+        t(joint_weights) if use_weights and use_joints else None,
+    )
     with backend.context():
-        fit = fitter.fit(
-            t(verts),
-            t(joints) if use_joints else None,
-            t(vertex_weights) if use_weights else None,
-            t(joint_weights) if use_weights and use_joints else None,
-            beta_regularizer=1.0,
-            requested_keys=['pose_rotvecs', 'shape_betas'],
-            **s,
-        )
+        if method == 'fit':
+            fit = fitter.fit(
+                *inputs,
+                beta_regularizer=1.0,
+                requested_keys=['pose_rotvecs', 'shape_betas'],
+                **s,
+            )
+        elif method == 'fit_with_known_pose':
+            fit = fitter.fit_with_known_pose(
+                t(pose), *inputs, beta_regularizer=1.0, requested_keys=['shape_betas'], **s
+            )
+        else:
+            fit = fitter.fit_with_known_shape(
+                t(betas), *inputs, requested_keys=['pose_rotvecs'], **s
+            )
     fit = {k: backend.to_numpy(v) for k, v in fit.items() if v is not None}
     np_model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
     vertices = np_model(
-        pose_rotvecs=fit['pose_rotvecs'], shape_betas=fit['shape_betas'], trans=fit['trans']
+        pose_rotvecs=fit.get('pose_rotvecs', pose),
+        shape_betas=fit.get('shape_betas', betas),
+        trans=fit['trans'],
     )['vertices']
     if s.get('scale_target'):
         # The fit matches the target scaled by scale_corr.
@@ -528,19 +553,221 @@ def _fit_vertices(
 
 @functools.lru_cache
 def _targets():
-    """Noisy SMPL vertices and joints of varied poses, with random weights."""
+    """Noisy SMPL vertices and joints of varied poses, random weights, and the true parameters."""
     import smplfitter.np
 
     rng = np.random.default_rng(0)
     batch_size = 6
     model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
+    pose = rng.normal(0, 0.4, (batch_size, 72)).astype(np.float32)
+    betas = rng.normal(0, 1, (batch_size, 10)).astype(np.float32)
     res = model(
-        pose_rotvecs=rng.normal(0, 0.4, (batch_size, 72)).astype(np.float32),
-        shape_betas=rng.normal(0, 1, (batch_size, 10)).astype(np.float32),
+        pose_rotvecs=pose,
+        shape_betas=betas,
         trans=rng.normal(0, 1, (batch_size, 3)).astype(np.float32),
     )
     verts = res['vertices'] + rng.normal(0, 0.02, res['vertices'].shape)
     joints = res['joints'] + rng.normal(0, 0.02, res['joints'].shape)
     vertex_weights = rng.uniform(0.2, 2, verts.shape[:2])
     joint_weights = rng.uniform(0.2, 2, joints.shape[:2])
-    return tuple(x.astype(np.float32) for x in (verts, joints, vertex_weights, joint_weights))
+    return tuple(
+        x.astype(np.float32) for x in (verts, joints, vertex_weights, joint_weights, pose, betas)
+    )
+
+
+# The scale rule. One rule for fit, fit_with_known_pose and fit_with_known_shape: the returned
+# trans belongs to BM(pose, betas, trans), and scale_corr scales about the world origin, so
+#     scale_fit:    scale_corr * BM(pose, betas, trans) = target
+#     scale_target: BM(pose, betas, trans) = scale_corr * target
+# The targets are noise-free. fit_with_known_shape has no scale_target option. Betas are not
+# compared with the truth, since they are confounded with the scale.
+
+# The largest amount in mm by which the mean vertex error of an element may exceed that of the
+# best translation. Measured with the rule: at most 0.12. The formulas that the rule replaces
+# exceed it by 6 to 950.
+SCALE_MARGIN_MM = 0.2
+
+# Limits of the mean vertex error of an element in mm, set just above the measured values.
+FIT_LIMIT_MM = 3.5  # measured 3.2; the rotations are estimated
+KNOWN_SHAPE_LIMIT_MM = 2.0  # measured 1.6; the rotations are estimated
+KNOWN_POSE_LIMIT_MM = 0.1  # measured 0.05; the rotations are exact, so an exact solution exists
+# measured 1.39; the true betas times a different scale per element cannot be shared
+KNOWN_POSE_SHARED_SCALE_FIT_LIMIT_MM = 1.6
+
+SCALE_CASES = {
+    'fit-scale_fit': dict(method='fit', mode='scale_fit', limit=FIT_LIMIT_MM),
+    'fit-scale_target': dict(method='fit', mode='scale_target', limit=FIT_LIMIT_MM),
+    'known_pose-scale_fit': dict(
+        method='fit_with_known_pose', mode='scale_fit', limit=KNOWN_POSE_LIMIT_MM
+    ),
+    'known_pose-scale_target': dict(
+        method='fit_with_known_pose', mode='scale_target', limit=KNOWN_POSE_LIMIT_MM
+    ),
+    'known_shape-scale_fit': dict(
+        method='fit_with_known_shape', mode='scale_fit', limit=KNOWN_SHAPE_LIMIT_MM
+    ),
+    'fit-scale_fit-kid': dict(method='fit', mode='scale_fit', kid=True, limit=FIT_LIMIT_MM),
+    'fit-scale_target-kid': dict(method='fit', mode='scale_target', kid=True, limit=FIT_LIMIT_MM),
+    'known_pose-scale_fit-kid': dict(
+        method='fit_with_known_pose', mode='scale_fit', kid=True, limit=KNOWN_POSE_LIMIT_MM
+    ),
+    'known_shape-scale_fit-kid': dict(
+        method='fit_with_known_shape', mode='scale_fit', kid=True, limit=KNOWN_SHAPE_LIMIT_MM
+    ),
+    'fit-scale_fit-share': dict(
+        method='fit', mode='scale_fit', share_beta=True, limit=FIT_LIMIT_MM
+    ),
+    'fit-scale_target-share': dict(
+        method='fit', mode='scale_target', share_beta=True, limit=FIT_LIMIT_MM
+    ),
+    'known_pose-scale_fit-share': dict(
+        method='fit_with_known_pose',
+        mode='scale_fit',
+        share_beta=True,
+        limit=KNOWN_POSE_SHARED_SCALE_FIT_LIMIT_MM,
+    ),
+    'known_pose-scale_target-share': dict(
+        method='fit_with_known_pose',
+        mode='scale_target',
+        share_beta=True,
+        limit=KNOWN_POSE_LIMIT_MM,
+    ),
+}
+
+
+@pytest.mark.parametrize('case', list(SCALE_CASES))
+def test_scale_rule(fitter_backend: Backend, case: str):
+    """The returned values satisfy the scale rule, as well as any translation can.
+
+    The rule error must be near the error of the best possible translation for the returned
+    pose, shape and scale. That lower bound is measured here, not assumed: it is above zero in
+    ``fit``, where the rotations are estimated, and near zero with exact rotations.
+    """
+    settings = dict(SCALE_CASES[case])
+    limit = settings.pop('limit')
+    rule_err, best_err = _scale_rule_errors(fitter_backend, **settings)
+    assert np.max(rule_err - best_err) < SCALE_MARGIN_MM, (
+        f'{fitter_backend.name}: mean vertex error {rule_err.mean():.3f} mm, '
+        f'best translation {best_err.mean():.3f} mm'
+    )
+    assert np.max(rule_err) < limit, f'{fitter_backend.name}: {np.max(rule_err):.3f} mm'
+
+
+@pytest.mark.parametrize('mode', ['scale_fit', 'scale_target', None])
+def test_returned_vertices_and_joints_are_the_model_output(fitter_backend: Backend, mode):
+    """Returned vertices and joints equal BM(pose, betas, trans) with the returned values.
+
+    Only the NumPy backend returns them; the others leave them out of the result.
+    """
+    model, fitter = _make_model_and_fitter(fitter_backend)
+    target_v, target_j, _, _ = _scale_targets(mode or 'scale_fit', scale=mode is not None)
+    t = fitter_backend.to_tensor
+    with fitter_backend.context():
+        fit = fitter.fit(
+            t(target_v),
+            t(target_j),
+            num_iter=3,
+            beta_regularizer=0.0,
+            requested_keys=['pose_rotvecs', 'shape_betas', 'vertices', 'joints'],
+            **({mode: True} if mode else {}),
+        )
+        forward = model(
+            pose_rotvecs=fit['pose_rotvecs'], shape_betas=fit['shape_betas'], trans=fit['trans']
+        )
+    if fitter_backend.name == 'np':
+        assert 'vertices' in fit and 'joints' in fit
+    for key in ('vertices', 'joints'):
+        if key in fit:
+            diff = fitter_backend.to_numpy(fit[key]) - fitter_backend.to_numpy(forward[key])
+            assert np.max(np.abs(diff)) < 1e-5
+
+
+def _scale_rule_errors(
+    backend: Backend, method: str, mode: str, kid: bool = False, share_beta: bool = False
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-element mean vertex errors in mm under the rule, and with the best translation."""
+    import smplfitter.np
+
+    model, fitter = _make_model_and_fitter(backend, enable_kid=kid)
+    target_v, target_j, pose, betas = _scale_targets(mode, kid=kid, share_beta=share_beta)
+    t = backend.to_tensor
+    kid_factor = _SCALE_KID_FACTOR * np.ones(len(pose), np.float32) if kid else None
+    with backend.context():
+        if method == 'fit':
+            fit = fitter.fit(
+                t(target_v),
+                t(target_j),
+                num_iter=5,
+                beta_regularizer=0.0,
+                share_beta=share_beta,
+                requested_keys=['pose_rotvecs', 'shape_betas'],
+                **{mode: True},
+            )
+        elif method == 'fit_with_known_pose':
+            fit = fitter.fit_with_known_pose(
+                t(pose),
+                t(target_v),
+                t(target_j),
+                beta_regularizer=0.0,
+                share_beta=share_beta,
+                requested_keys=['shape_betas'],
+                **{mode: True},
+            )
+        else:
+            fit = fitter.fit_with_known_shape(
+                t(betas),
+                t(target_v),
+                t(target_j),
+                kid_factor=t(kid_factor) if kid else None,
+                num_iter=3,
+                requested_keys=['pose_rotvecs'],
+                **{mode: True},
+            )
+    fit = {k: backend.to_numpy(v) for k, v in fit.items() if v is not None}
+    fit_kid = fit.get('kid_factor', kid_factor)
+    np_model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
+    at_origin = np_model(
+        pose_rotvecs=fit.get('pose_rotvecs', pose),
+        shape_betas=fit.get('shape_betas', betas),
+        trans=np.zeros((len(pose), 3), np.float32),
+        kid_factor=fit_kid,
+    )['vertices']
+    # Double precision: far from the origin, the float32 mean of the residual is too coarse for
+    # a lower bound at this level.
+    at_origin = at_origin.astype(np.float64)
+    target_v = target_v.astype(np.float64)
+    scale = fit['scale_corr'][:, None, None].astype(np.float64)
+    trans = fit['trans'][:, None].astype(np.float64)
+    if mode == 'scale_fit':
+        rule = scale * (at_origin + trans) - target_v
+        best = scale * at_origin - target_v
+    else:
+        rule = at_origin + trans - scale * target_v
+        best = at_origin - scale * target_v
+    best = best - np.mean(best, axis=1, keepdims=True)
+    return tuple(1000 * np.mean(np.linalg.norm(x, axis=-1), axis=1) for x in (rule, best))
+
+
+_SCALE_KID_FACTOR = 0.3
+
+
+def _scale_targets(mode: str, kid: bool = False, share_beta: bool = False, scale: bool = True):
+    """Noise-free targets (vertices, joints) of bodies far from the origin, and pose and betas."""
+    import smplfitter.np
+
+    rng = np.random.default_rng(0)
+    batch_size = 4
+    model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
+    pose = rng.normal(0, 0.15, (batch_size, 72)).astype(np.float32)
+    betas = rng.normal(0, 1, (batch_size, 10)).astype(np.float32)
+    if share_beta:
+        betas[1:] = betas[0]
+    trans = rng.normal(0, 2, (batch_size, 3)).astype(np.float32)
+    factor = rng.uniform(0.85, 1.2, batch_size).astype(np.float32)[:, None, None]
+    if not scale:
+        factor = np.ones_like(factor)
+    kid_factor = _SCALE_KID_FACTOR * np.ones(batch_size, np.float32) if kid else None
+    res = model(pose_rotvecs=pose, shape_betas=betas, trans=trans, kid_factor=kid_factor)
+    if mode == 'scale_target':
+        factor = 1 / factor
+    return res['vertices'] * factor, res['joints'] * factor, pose, betas
