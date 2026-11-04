@@ -90,6 +90,20 @@ def test_reset_restarts_the_stream(body_model):
     np.testing.assert_array_equal(_run(smoother, frames), fresh)
 
 
+def test_non_finite_frame_gives_nan_and_then_recovers(body_model):
+    truth = _motion()
+    frames = [(truth['vertices'][i], truth['joints'][i]) for i in range(16)]
+    index = 3
+    bad_joints = frames[index][1].copy()
+    bad_joints[3, 1] = np.nan
+    frames[index] = (frames[index][0], bad_joints)
+    outputs = _run(CausalPoseSmoother(body_model, window=5), frames)
+    assert np.all(np.isfinite(outputs[:index]))
+    assert np.all(np.isnan(outputs[index]))
+    # It leaves the window of raw frames and then that of the smoothed frames.
+    assert np.all(np.isfinite(outputs[index + 2 * 5 :]))
+
+
 def test_returned_values_are_consistent_with_the_model(body_model):
     truth = _motion()
     smoother = CausalPoseSmoother(body_model)

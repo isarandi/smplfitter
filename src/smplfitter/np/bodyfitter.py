@@ -17,6 +17,11 @@ class BodyFitter:
     """
     Fits body model (SMPL/SMPL-X/SMPL+H) parameters to lists of target vertices and joints.
 
+    An element that fails, through non-finite input or a singular solve (for example when all its
+    weights are zero and a regularizer is zero), gives NaN in all its results. The other elements
+    of the batch are not affected, except with ``share_beta``, where all elements share the failed
+    shape and so all give NaN.
+
     Parameters:
         body_model: The SMPL model instance we wish to fit, of a certain model variant and gender.
         enable_kid: Enables the use of a kid blendshape, allowing for fitting kid shapes as in
@@ -232,8 +237,8 @@ class BodyFitter:
             final_adjust_rots: Whether to perform a final refinement of the body part
                 orientations to improve alignment.
             scale_target: If True, estimates ``scale_corr`` so that
-                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
-                origin.
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the
+                world origin.
             scale_fit: If True, estimates ``scale_corr`` so that
                 ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
                 world origin.
@@ -428,7 +433,7 @@ class BodyFitter:
             rotvecs = mat2rotvec(result['relative_orientations'])
             result['pose_rotvecs'] = rotvecs.reshape(rotvecs.shape[0], -1)
 
-        return result
+        return _nan_failed_elements(result)
 
     def fit_with_known_pose(
         self,
@@ -464,8 +469,8 @@ class BodyFitter:
             kid_regularizer: Regularization for kid blendshape factor.
             share_beta: Whether to share shape params across batch.
             scale_target: If True, estimates ``scale_corr`` so that
-                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
-                origin.
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the
+                world origin.
             scale_fit: If True, estimates ``scale_corr`` so that
                 ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
                 world origin.
@@ -516,7 +521,7 @@ class BodyFitter:
         result.pop('vertices', None)
         result.pop('joints', None)
 
-        return {k: v for k, v in result.items() if v is not None}
+        return _nan_failed_elements(result)
 
     def fit_with_known_shape(
         self,
@@ -684,7 +689,7 @@ class BodyFitter:
             rotvecs = mat2rotvec(result['relative_orientations'])
             result['pose_rotvecs'] = rotvecs.reshape(rotvecs.shape[0], -1)
 
-        return result
+        return _nan_failed_elements(result)
 
     def _fit_shape(
         self,
@@ -1078,6 +1083,28 @@ class BodyFitter:
         return np.stack(glob_rots, axis=1)
 
 
+def _nan_failed_elements(result):
+    """Gives NaN for all results of the elements that failed, so that none looks like a fit.
+
+    Non-finite input or a singular solve can leave some of the results of an element finite, for
+    example the rotations of the parts that the bad value did not reach. Every failure reaches
+    the translation or the orientations, so these two identify the failed elements.
+    """
+    failed = ~np.all(np.isfinite(result['trans']), axis=-1)
+    if 'orientations' in result:
+        failed |= ~np.all(np.isfinite(result['orientations']), axis=(-3, -2, -1))
+    result = {k: v for k, v in result.items() if v is not None}
+    if not np.any(failed):
+        return result
+    return {k: _with_nan_at(v, failed) for k, v in result.items()}
+
+
+def _with_nan_at(values, indices):
+    values = np.array(values)
+    values[indices] = np.nan
+    return values
+
+
 def _uncentered_trans(trans, target_mean, scale_corr, scale_target, scale_fit):
     """Translation for ``BM(pose, betas, trans)`` from that of the fit to the centered targets.
 
@@ -1120,7 +1147,9 @@ def fit_scale_and_translation(
                 dtype=np.float32,
             )
 
-    weights_both = weights_both / np.sum(weights_both, axis=1, keepdims=True)
+    # An element without any weight has no solution. NaN marks it, without a division warning.
+    weight_sum = np.sum(weights_both, axis=1, keepdims=True)
+    weights_both = weights_both / np.where(weight_sum == 0, np.nan, weight_sum)
 
     weighted_mean_target = np.sum(target_both * weights_both[..., np.newaxis], axis=1)
     weighted_mean_reference = np.sum(reference_both * weights_both[..., np.newaxis], axis=1)

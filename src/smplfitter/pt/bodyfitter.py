@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import math
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 import torch
 import torch.nn as nn
 from .. import common as smplfitter_common
-from .lstsq import lstsq, lstsq_partial_share
+from .lstsq import cholesky_solve_or_nan, lstsq, lstsq_partial_share
 from .rotation import align_unit_vectors, divide_no_nan, mat2rotvec, proj_SO3_with, rotvec2mat
 
 if TYPE_CHECKING:
@@ -15,6 +16,11 @@ if TYPE_CHECKING:
 
 class BodyFitter(nn.Module):
     """Fits body model (SMPL/SMPL-X/SMPL+H) parameters to lists of target vertices and joints.
+
+    An element that fails, through non-finite input or a singular solve (for example when all its
+    weights are zero and a regularizer is zero), gives NaN in all its results. The other elements
+    of the batch are not affected, except with ``share_beta``, where all elements share the failed
+    shape and so all give NaN.
 
     Parameters:
         body_model: The body model instance we wish to fit, of a certain SMPL model variant and \
@@ -342,8 +348,8 @@ class BodyFitter(nn.Module):
             final_adjust_rots: Whether to perform a final refinement of the body part
                 orientations to improve alignment.
             scale_target: If True, estimates ``scale_corr`` so that
-                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
-                origin.
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the
+                world origin.
             scale_fit: If True, estimates ``scale_corr`` so that
                 ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
                 world origin.
@@ -576,7 +582,7 @@ class BodyFitter(nn.Module):
         for k, v in result.items():
             if v is not None:
                 result_non_none[k] = v
-        return result_non_none
+        return _nan_failed_elements(result_non_none)
 
     def fit_streaming(
         self,
@@ -649,8 +655,8 @@ class BodyFitter(nn.Module):
             kid_regularizer: Regularization weight for the kid blendshape factor.
             share_beta: Whether to share the shape parameters (betas) across instances in the batch.
             scale_target: If True, estimates ``scale_corr`` so that
-                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
-                origin.
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the
+                world origin.
             scale_fit: If True, estimates ``scale_corr`` so that
                 ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
                 world origin.
@@ -719,7 +725,7 @@ class BodyFitter(nn.Module):
         for k, v in result.items():
             if v is not None:
                 result_non_none[k] = v
-        return result_non_none
+        return _nan_failed_elements(result_non_none)
 
     @torch.jit.export
     def fit_with_known_shape(
@@ -918,7 +924,7 @@ class BodyFitter(nn.Module):
         for k, v in result.items():
             if v is not None:
                 result_non_none[k] = v
-        return result_non_none
+        return _nan_failed_elements(result_non_none)
 
     def _fit_shape(
         self,
@@ -1163,8 +1169,9 @@ class BodyFitter(nn.Module):
                 l2_reference = l2_reference[:, :n_betas]
         l2_regularizer_rhs = (l2_regularizer_all * l2_reference).unsqueeze(-1)
 
-        chol, _ = torch.linalg.cholesky_ex(gram_cen + torch.diag(l2_regularizer_all))
-        x = torch.cholesky_solve(rhs_cen + l2_regularizer_rhs, chol)
+        x = cholesky_solve_or_nan(
+            gram_cen + torch.diag(l2_regularizer_all), rhs_cen + l2_regularizer_rhs
+        )
 
         mean_A = sum_A / w_sum_safe  # (B, 3, S)
         mean_b = sum_b / w_sum_safe  # (B, 3, 1)
@@ -1713,6 +1720,23 @@ def _gram_block(
         sum_b = (b * w.unsqueeze(-1)).sum(dim=1).unsqueeze(-1)
         w_sum = w.sum(dim=1).view(B, 1, 1).to(torch.float64)
     return gram.double(), rhs.double(), sum_A.double(), sum_b.double(), w_sum
+
+
+def _nan_failed_elements(result: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Gives NaN for all results of the elements that failed, so that none looks like a fit.
+
+    Non-finite input or a singular solve can leave some of the results of an element finite, for
+    example the rotations of the parts that the bad value did not reach. Every failure reaches
+    the translation or the orientations, so these two identify the failed elements.
+    """
+    failed = ~torch.isfinite(result['trans']).all(dim=-1)
+    if 'orientations' in result:
+        failed = failed | ~torch.isfinite(result['orientations']).flatten(1).all(dim=1)
+    nan = result['trans'].new_full((), math.nan)
+    output: dict[str, torch.Tensor] = {}
+    for k, v in result.items():
+        output[k] = torch.where(failed.view([-1] + [1] * (v.dim() - 1)), nan, v)
+    return output
 
 
 def _uncentered_trans(

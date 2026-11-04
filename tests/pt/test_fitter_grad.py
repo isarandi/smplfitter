@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import smplfitter.pt as smpl_pt
+from smplfitter.pt.rotation import proj_SO3_with
 
 
 def _make_targets(model_name: str, batch_size: int, seed: int = 0):
@@ -100,3 +101,38 @@ def test_fitter_grad_vs_finite_diff(seed):
     # a reflection-branch `where` that can be non-smooth near the boundary, biasing FD.
     # Still tight enough to catch sign flips, magnitude errors, or NaN regressions.
     assert rel < 5e-2, f'seed={seed}: autograd={ag_dir:.4e}, fd={fd_dir:.4e}, rel={rel:.3e}'
+
+
+@pytest.mark.parametrize('projection', ['svd', 'analytic'])
+def test_projections_give_nan_only_for_non_finite_matrices(projection):
+    matrices = torch.eye(3).repeat(4, 1, 1) + 0.1
+    matrices[1, 0, 0] = float('nan')
+    matrices[2, 2, 1] = float('inf')
+    rotations = proj_SO3_with(matrices, projection)
+    assert torch.isnan(rotations[[1, 2]]).all()
+    assert torch.isfinite(rotations[[0, 3]]).all()
+    expected = proj_SO3_with(matrices[[0, 3]], projection)
+    assert (rotations[[0, 3]] - expected).abs().max() < 1e-6
+
+
+@pytest.mark.parametrize('projection', ['svd', 'analytic'])
+def test_failed_element_keeps_the_gradient_of_the_others(projection):
+    bm, target_v, target_j = _make_targets('smpl', batch_size=3)
+    fitter = smpl_pt.BodyFitter(bm)
+    target_v = target_v.clone()
+    target_v[1, 100, 1] = float('nan')
+    good = [0, 2]
+    tv = target_v.requires_grad_(True)
+    fit = fitter.fit(
+        target_vertices=tv,
+        target_joints=target_j,
+        num_iter=2,
+        beta_regularizer=1.0,
+        requested_keys=['pose_rotvecs', 'shape_betas'],
+        rotation_projection=projection,
+    )
+    assert torch.isnan(fit['trans'][1]).all()
+    loss = sum((fit[k][good] ** 2).sum() for k in ('pose_rotvecs', 'shape_betas', 'trans'))
+    loss.backward()
+    assert torch.isfinite(tv.grad[good]).all()
+    assert tv.grad[good].abs().max() > 0

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import os
+import warnings
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -776,7 +778,7 @@ def _scale_targets(mode: str, kid: bool = False, share_beta: bool = False, scale
 def test_tf_keeps_nan_by_default(fitter_backend: Backend):
     """A failed TF fit shows up as NaN, unless zeros are requested with allow_nan=False."""
     if fitter_backend.name != 'tf':
-        pytest.skip('allow_nan exists only in the TF backend')
+        pytest.skip('only the TF backend can replace NaN by zeros')
     _, fitter = _make_model_and_fitter(fitter_backend)
     target_v, target_j, _, _ = _scale_targets('scale_fit')
     target_v[1, 100] = np.nan
@@ -786,3 +788,133 @@ def test_tf_keeps_nan_by_default(fitter_backend: Backend):
     assert np.all(np.isfinite(fitter_backend.to_numpy(fit['trans'])[0]))
     zeroed = fitter.fit(t(target_v), t(target_j), allow_nan=False, requested_keys=['pose_rotvecs'])
     assert np.all(fitter_backend.to_numpy(zeroed['trans'])[1] == 0)
+
+
+# One failed batch element: non-finite input, or all weights zero with a zero regularizer. The bad
+# element gives NaN in all its results, and the others equal a fit without the bad element.
+
+BAD_ELEMENT = 1
+BAD_ELEMENT_CASES = [
+    'nan_vertex',
+    'nan_joint',
+    'nan_vertex_weight',
+    'nan_joint_weight',
+    'zero_weights',
+]
+BAD_ELEMENT_METHODS = ['fit', 'fit_with_known_pose', 'fit_with_known_shape']
+
+
+@pytest.mark.parametrize('method', BAD_ELEMENT_METHODS)
+@pytest.mark.parametrize('case', BAD_ELEMENT_CASES)
+def test_failed_element_is_nan_and_others_are_unaffected(fitter_backend: Backend, method, case):
+    inputs = _bad_element_inputs(case)
+    good = [i for i in range(3) if i != BAD_ELEMENT]
+    with _no_numpy_warnings(fitter_backend):
+        batch = _fit_bad_element_inputs(fitter_backend, method, inputs)
+    alone = _fit_bad_element_inputs(
+        fitter_backend, method, {k: v[good] for k, v in inputs.items()}
+    )
+
+    for key, values in batch.items():
+        assert np.all(np.isnan(values[BAD_ELEMENT])), f'{key} of the failed element is not NaN'
+        assert np.all(np.isfinite(values[good])), f'{key} of the good elements is not finite'
+        # Rounding differs between batch sizes. Rotation vectors of the SMPL hands are the least
+        # constrained results, at up to 1e-3 rad.
+        np.testing.assert_allclose(values[good], alone[key], atol=2e-3, err_msg=key)
+
+
+@pytest.mark.parametrize('case', ['nan_vertex', 'nan_vertex_weight', 'zero_weights'])
+def test_failed_element_without_target_joints(fitter_backend: Backend, case):
+    inputs = _bad_element_inputs(case)
+    inputs['joints'] = None
+    good = [i for i in range(3) if i != BAD_ELEMENT]
+    with _no_numpy_warnings(fitter_backend):
+        batch = _fit_bad_element_inputs(fitter_backend, 'fit', inputs)
+    alone = _fit_bad_element_inputs(
+        fitter_backend, 'fit', {k: None if v is None else v[good] for k, v in inputs.items()}
+    )
+    for key, values in batch.items():
+        assert np.all(np.isnan(values[BAD_ELEMENT])), f'{key} of the failed element is not NaN'
+        np.testing.assert_allclose(values[good], alone[key], atol=2e-3, err_msg=key)
+
+
+def test_failed_element_with_shared_shape_fails_the_batch_without_an_error(
+    fitter_backend: Backend,
+):
+    inputs = _bad_element_inputs('nan_vertex')
+    batch = _fit_bad_element_inputs(fitter_backend, 'fit', inputs, share_beta=True)
+    assert np.all(np.isnan(batch['shape_betas']))
+
+
+def test_all_zero_weights_with_a_regularizer_give_the_regularizer_reference(
+    fitter_backend: Backend,
+):
+    """With every parameter constrained, all-zero weights are not a failure in any backend."""
+    inputs = _bad_element_inputs('zero_weights')
+    batch = _fit_bad_element_inputs(fitter_backend, 'fit', inputs, beta_regularizer2=1.0)
+    assert np.all(np.isfinite(batch['shape_betas']))
+    np.testing.assert_allclose(batch['shape_betas'][BAD_ELEMENT], 0.0, atol=1e-6)
+
+
+def _bad_element_inputs(case: str) -> dict:
+    import smplfitter.np
+
+    rng = np.random.default_rng(3)
+    model = smplfitter.np.BodyModel('smpl', 'neutral', num_betas=10)
+    pose = rng.normal(0, 0.2, (3, 72)).astype(np.float32)
+    betas = rng.normal(0, 1, (3, 10)).astype(np.float32)
+    posed = model(
+        pose_rotvecs=pose, shape_betas=betas, trans=rng.normal(0, 1, (3, 3)).astype(np.float32)
+    )
+    inputs = dict(
+        pose=pose,
+        betas=betas,
+        vertices=np.array(posed['vertices'], np.float32),
+        joints=np.array(posed['joints'], np.float32),
+        vertex_weights=np.ones(posed['vertices'].shape[:2], np.float32),
+        joint_weights=np.ones(posed['joints'].shape[:2], np.float32),
+    )
+    if case == 'nan_vertex':
+        inputs['vertices'][BAD_ELEMENT, 100, 1] = np.nan
+    elif case == 'nan_joint':
+        inputs['joints'][BAD_ELEMENT, 3, 1] = np.nan
+    elif case == 'nan_vertex_weight':
+        inputs['vertex_weights'][BAD_ELEMENT, 100] = np.nan
+    elif case == 'nan_joint_weight':
+        inputs['joint_weights'][BAD_ELEMENT, 3] = np.nan
+    else:
+        inputs['vertex_weights'][BAD_ELEMENT] = 0
+        inputs['joint_weights'][BAD_ELEMENT] = 0
+    return inputs
+
+
+def _fit_bad_element_inputs(backend: Backend, method: str, inputs: dict, **kwargs) -> dict:
+    model, fitter = _make_model_and_fitter(backend)
+    t = backend.to_tensor
+    targets = (
+        t(inputs['vertices']),
+        None if inputs['joints'] is None else t(inputs['joints']),
+        t(inputs['vertex_weights']),
+        None if inputs['joints'] is None else t(inputs['joint_weights']),
+    )
+    with backend.context():
+        if method == 'fit':
+            fit = fitter.fit(*targets, num_iter=2, requested_keys=['pose_rotvecs'], **kwargs)
+        elif method == 'fit_with_known_pose':
+            fit = fitter.fit_with_known_pose(
+                t(inputs['pose']), *targets, requested_keys=['shape_betas'], **kwargs
+            )
+        else:
+            fit = fitter.fit_with_known_shape(
+                t(inputs['betas']), *targets, num_iter=2, requested_keys=['pose_rotvecs'], **kwargs
+            )
+    return {k: backend.to_numpy(v) for k, v in fit.items() if v is not None}
+
+
+@contextlib.contextmanager
+def _no_numpy_warnings(backend: Backend):
+    """The NumPy-based backends must handle a failed element without a warning."""
+    with warnings.catch_warnings():
+        if backend.name in ('np', 'nb'):
+            warnings.simplefilter('error', RuntimeWarning)
+        yield

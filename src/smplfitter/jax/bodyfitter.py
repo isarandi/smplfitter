@@ -13,6 +13,11 @@ if TYPE_CHECKING:
 class BodyFitter:
     """Fits body model (SMPL/SMPL-X/SMPL+H) parameters to target vertices and joints.
 
+    An element that fails, through non-finite input or a singular solve (for example when all its
+    weights are zero and a regularizer is zero), gives NaN in all its results. The other elements
+    of the batch are not affected, except with ``share_beta``, where all elements share the failed
+    shape and so all give NaN.
+
     Args:
         body_model: The body model instance to fit.
         enable_kid: Enables the use of a kid blendshape for fitting kid shapes.
@@ -220,8 +225,8 @@ class BodyFitter:
             share_beta: If True, shares shape parameters across batch.
             final_adjust_rots: Whether to refine body part orientations after fitting.
             scale_target: If True, estimates ``scale_corr`` so that
-                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
-                origin.
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the
+                world origin.
             scale_fit: If True, estimates ``scale_corr`` so that
                 ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
                 world origin.
@@ -419,7 +424,7 @@ class BodyFitter:
         result.pop('vertices', None)
         result.pop('joints', None)
 
-        return {k: v for k, v in result.items() if v is not None}
+        return _nan_failed_elements(result)
 
     def fit_with_known_pose(
         self,
@@ -453,8 +458,8 @@ class BodyFitter:
             kid_regularizer: Regularization for kid blendshape factor.
             share_beta: Whether to share shape parameters across batch.
             scale_target: If True, estimates ``scale_corr`` so that
-                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the world
-                origin.
+                ``BM(pose, betas, trans) = scale_corr * target``, scaling the target about the
+                world origin.
             scale_fit: If True, estimates ``scale_corr`` so that
                 ``scale_corr * BM(pose, betas, trans) = target``, scaling the fitted body about the
                 world origin.
@@ -517,7 +522,7 @@ class BodyFitter:
         result.pop('joints', None)
         result.pop('relative_orientations', None)
 
-        return {k: v for k, v in result.items() if v is not None}
+        return _nan_failed_elements(result)
 
     def fit_with_known_shape(
         self,
@@ -689,7 +694,7 @@ class BodyFitter:
             rotvecs = mat2rotvec(rel_ori)
             result_out['pose_rotvecs'] = rotvecs.reshape(rotvecs.shape[0], -1)
 
-        return result_out
+        return _nan_failed_elements(result_out)
 
     def _fit_shape(
         self,
@@ -1119,6 +1124,23 @@ class BodyFitter:
             glob_rots.append(glob_rot)
 
         return jnp.stack(glob_rots, axis=1)
+
+
+def _nan_failed_elements(result: dict) -> dict:
+    """Gives NaN for all results of the elements that failed, so that none looks like a fit.
+
+    Non-finite input or a singular solve can leave some of the results of an element finite, for
+    example the rotations of the parts that the bad value did not reach. Every failure reaches
+    the translation or the orientations, so these two identify the failed elements.
+    """
+    failed = ~jnp.all(jnp.isfinite(result['trans']), axis=-1)
+    if 'orientations' in result:
+        failed = failed | ~jnp.all(jnp.isfinite(result['orientations']), axis=(-3, -2, -1))
+    return {
+        k: jnp.where(failed.reshape((-1,) + (1,) * (v.ndim - 1)), jnp.nan, v)
+        for k, v in result.items()
+        if v is not None
+    }
 
 
 def _uncentered_trans(

@@ -11,7 +11,19 @@ def divide_no_nan(a, b):
 
 
 def proj_SO3(A):
-    """Project (..., 3, 3) matrices onto SO(3) — closest rotation in Frobenius norm."""
+    """Project (..., 3, 3) matrices onto SO(3) — closest rotation in Frobenius norm.
+
+    A non-finite matrix gives NaN. It would stop the batched SVD for all the others otherwise.
+    """
+    finite = np.all(np.isfinite(A), axis=(-2, -1))
+    if np.all(finite):
+        return _proj_SO3_finite(A)
+    finite = finite[..., np.newaxis, np.newaxis]
+    rotations = _proj_SO3_finite(np.where(finite, A, np.eye(3, dtype=A.dtype)))
+    return np.where(finite, rotations, np.array(np.nan, dtype=A.dtype))
+
+
+def _proj_SO3_finite(A):
     U, _, Vh = np.linalg.svd(A)
     T = U @ Vh
     has_reflection = (np.linalg.det(T) < 0)[..., np.newaxis, np.newaxis]

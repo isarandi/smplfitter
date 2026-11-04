@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 from typing import Optional
+
 import torch
 
 
@@ -41,8 +43,20 @@ def lstsq(
         regularized_gramian = regularized_gramian.sum(dim=0, keepdim=True)
         ATb = ATb.sum(dim=0, keepdim=True)
 
-    chol, _ = torch.linalg.cholesky_ex(regularized_gramian)
-    return torch.cholesky_solve(ATb, chol)
+    return cholesky_solve_or_nan(regularized_gramian, ATb)
+
+
+def cholesky_solve_or_nan(gramian: torch.Tensor, rhs: torch.Tensor) -> torch.Tensor:
+    """Solves ``gramian @ x = rhs`` per batch element. An unsolvable element gives NaN.
+
+    Uses the factorization status directly, which adds no host-device synchronization. Without
+    this, an unsolvable element would get values from an incomplete factorization.
+    """
+    chol, info = torch.linalg.cholesky_ex(gramian)
+    solution = torch.cholesky_solve(rhs, chol)
+    return torch.where(
+        (info == 0).unsqueeze(-1).unsqueeze(-1), solution, rhs.new_full((), math.nan)
+    )
 
 
 def lstsq_partial_share(

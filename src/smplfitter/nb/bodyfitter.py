@@ -21,6 +21,11 @@ class BodyFitter:
     """
     Fits body model (SMPL/SMPL-X/SMPL+H) parameters to target vertices and joints.
 
+    An element that fails, through non-finite input or a singular solve (for example when all its
+    weights are zero and a regularizer is zero), gives NaN in all its results. The other elements
+    of the batch are not affected, except with ``share_beta``, where all elements share the failed
+    shape and so all give NaN.
+
     Parameters:
         body_model: The body model instance to fit.
         enable_kid: Enables the use of a kid blendshape.
@@ -317,7 +322,7 @@ class BodyFitter:
         if 'joints' in result:
             del result['joints']
 
-        return {k: v for k, v in result.items() if v is not None}
+        return _nan_failed_elements(result)
 
     def fit_with_known_pose(
         self,
@@ -380,7 +385,7 @@ class BodyFitter:
         result.pop('vertices', None)
         result.pop('joints', None)
         result.pop('relative_orientations', None)
-        return {k: v for k, v in result.items() if v is not None}
+        return _nan_failed_elements(result)
 
     def fit_with_known_shape(
         self,
@@ -546,7 +551,7 @@ class BodyFitter:
             rotvecs = mat2rotvec(result['relative_orientations'])
             result['pose_rotvecs'] = rotvecs.reshape(batch_size, -1)
 
-        return result
+        return _nan_failed_elements(result)
 
     def _fit_shape(
         self,
@@ -824,6 +829,28 @@ class BodyFitter:
         )
 
 
+def _nan_failed_elements(result: dict) -> dict:
+    """Gives NaN for all results of the elements that failed, so that none looks like a fit.
+
+    Non-finite input or a singular solve can leave some of the results of an element finite, for
+    example the rotations of the parts that the bad value did not reach. Every failure reaches
+    the translation or the orientations, so these two identify the failed elements.
+    """
+    failed = ~np.all(np.isfinite(result['trans']), axis=-1)
+    if 'orientations' in result:
+        failed |= ~np.all(np.isfinite(result['orientations']), axis=(-3, -2, -1))
+    result = {k: v for k, v in result.items() if v is not None}
+    if not np.any(failed):
+        return result
+    return {k: _with_nan_at(v, failed) for k, v in result.items()}
+
+
+def _with_nan_at(values: np.ndarray, indices: np.ndarray) -> np.ndarray:
+    values = np.array(values)
+    values[indices] = np.nan
+    return values
+
+
 def _uncentered_trans(
     trans: np.ndarray,
     target_mean: np.ndarray,
@@ -872,7 +899,9 @@ def fit_scale_and_translation(
                 dtype=np.float32,
             )
 
-    weights_both = weights_both / np.sum(weights_both, axis=1, keepdims=True)
+    # An element without any weight has no solution. NaN marks it, without a division warning.
+    weight_sum = np.sum(weights_both, axis=1, keepdims=True)
+    weights_both = weights_both / np.where(weight_sum == 0, np.nan, weight_sum)
 
     weighted_mean_target = np.sum(target_both * weights_both[..., np.newaxis], axis=1)
     weighted_mean_reference = np.sum(reference_both * weights_both[..., np.newaxis], axis=1)
@@ -1268,11 +1297,7 @@ def _fit_global_rotations_dependent_core(
                         y_val = reference_joints[b, child_idx, c] - true_reference_joints[b, i, c]
                         A[r, c] += x_val * y_val
 
-            # SVD
-            U, _, Vh = np.linalg.svd(A)
-            T = U @ Vh
-            if np.linalg.det(T) < 0:
-                T = T - np.float32(2.0) * U[:, -1:] @ Vh[-1:, :]
+            T = proj_SO3_single(A)
 
             # Multiply by previous rotation
             for r in range(3):

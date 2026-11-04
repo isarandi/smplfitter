@@ -526,3 +526,22 @@ request only what you need:
 Available keys: ``pose_rotvecs``, ``shape_betas``, ``trans``, ``vertices``,
 ``joints``, ``orientations``, ``relative_orientations``, ``kid_factor``,
 ``scale_corr``.
+
+
+Handle Failed Elements
+----------------------
+
+If one element of a batch fails, for example through a NaN in its input or because all its weights
+are zero, that element gives NaN in all its results. The other elements are not affected and stay
+valid, in all backends:
+
+.. code-block:: python
+
+   result = fitter.fit(target_vertices=vertices, target_joints=joints)
+   failed = torch.isnan(result['trans']).any(dim=-1)
+
+With ``share_beta=True``, all elements share one solve, so one failed element gives NaN for the
+whole batch. All-zero weights give a failure only where the regularizer leaves a parameter without
+any constraint: with the default ``beta_regularizer2=0`` this is the case, and with a positive
+value the element gets the regularizer reference instead. In TensorFlow, ``allow_nan=False``
+replaces the NaN values by zeros.

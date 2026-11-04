@@ -90,3 +90,40 @@ def test_analytic_fit_captures_in_cuda_graph():
         assert _max_vertex_diff_mm(bm, replayed, eager) < 0.01
     finally:
         torch.backends.cuda.preferred_linalg_library(previous)
+
+
+def test_analytic_fit_marks_a_failed_element_in_a_cuda_graph():
+    """The graph path has no host-device sync, and a failed element still comes back as NaN."""
+    previous = torch.backends.cuda.preferred_linalg_library()
+    torch.backends.cuda.preferred_linalg_library('cusolver')
+    try:
+        bm = smpl_pt.BodyModel('smpl', num_betas=10).cuda()
+        fitter = torch.jit.script(smpl_pt.BodyFitter(bm).cuda())
+        static_inputs = _noisy_targets(4, seed=1)
+        with torch.inference_mode():
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    _fit(fitter, static_inputs, 'analytic')
+            torch.cuda.current_stream().wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                graph_out = _fit(fitter, static_inputs, 'analytic')
+
+            new_inputs = _noisy_targets(4, seed=2)
+            new_inputs[0][2, 100, 1] = float('nan')
+            for static, new in zip(static_inputs, new_inputs):
+                static.copy_(new)
+            graph.replay()
+            torch.cuda.synchronize()
+            replayed = {k: v.clone() for k, v in graph_out.items()}
+            eager = _fit(fitter, new_inputs, 'analytic')
+        good = [0, 1, 3]
+        for key in ('pose_rotvecs', 'shape_betas', 'trans'):
+            assert torch.isnan(replayed[key][2]).all(), key
+            assert torch.isfinite(replayed[key][good]).all(), key
+            assert torch.isnan(eager[key][2]).all(), key
+            assert (replayed[key][good] - eager[key][good]).abs().max() < 1e-3, key
+    finally:
+        torch.backends.cuda.preferred_linalg_library(previous)

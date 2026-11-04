@@ -107,9 +107,17 @@ def _solve_cholesky(A, b):
 
 @numba.njit(error_model='numpy', cache=True)
 def _solve_cholesky_small(A, b):
-    """Hand-rolled Cholesky solver, faster for small matrices (n <= 16)."""
+    """Hand-rolled Cholesky solver, faster for small matrices (n <= 16).
+
+    A diagonal that is NaN or not positive gives NaN: then the input is non-finite, or a parameter
+    has no data and no regularizer. Small negative pivots elsewhere are regularized below.
+    """
     n = A.shape[0]
     m = b.shape[1]
+
+    for i in range(n):
+        if not A[i, i] > 0:
+            return np.full((n, m), np.nan, dtype=np.float32)
 
     # Cholesky decomposition: A = L @ L.T
     L = np.zeros((n, n), dtype=np.float32)

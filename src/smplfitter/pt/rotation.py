@@ -110,8 +110,10 @@ def proj_SO3_analytic(A: torch.Tensor) -> torch.Tensor:
     V = torch.stack([v1, v2, v3], dim=-1)  # columns
     R = U @ V.mT
 
-    # Guard the fully degenerate A ~ 0 case -> identity.
+    # Guard the fully degenerate A ~ 0 case -> identity. The comparison is also false for NaN,
+    # which must not turn into a valid rotation, so non-finite input gives NaN.
     R = torch.where((fro > 1e-20).unsqueeze(-1).unsqueeze(-1), R, eye)
+    R = torch.where(torch.isfinite(fro).unsqueeze(-1).unsqueeze(-1), R, R.new_full((), math.nan))
     return R.to(orig_dtype)
 
 
@@ -120,12 +122,18 @@ def proj_SO3_svd(A: torch.Tensor) -> torch.Tensor:
 
     Computes the rotation part of the polar decomposition via SVD, with a sign flip
     on the last singular vector when the naive product is a reflection.
+
+    A non-finite matrix gives NaN. It would raise an error for the whole batch in the SVD
+    otherwise. The check is branch-free, so it adds no host-device synchronization.
     """
-    U, _, Vh = torch.linalg.svd(A)
+    finite = torch.isfinite(A).all(dim=-1).all(dim=-1).unsqueeze(-1).unsqueeze(-1)
+    U, _, Vh = torch.linalg.svd(
+        torch.where(finite, A, torch.eye(3, dtype=A.dtype, device=A.device))
+    )
     T = U @ Vh
     has_reflection = (torch.det(T) < 0).unsqueeze(-1).unsqueeze(-1)
     T_mirror = T - 2 * U[..., -1:] @ Vh[..., -1:, :]
-    return torch.where(has_reflection, T_mirror, T)
+    return torch.where(finite, torch.where(has_reflection, T_mirror, T), T.new_full((), math.nan))
 
 
 def _sym_eigvals3(M: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

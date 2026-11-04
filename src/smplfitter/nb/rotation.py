@@ -38,7 +38,12 @@ def kabsch(X, Y):
 
 @numba.njit(error_model='numpy', cache=True)
 def proj_SO3_single(A):
-    """Project a single 3x3 matrix onto SO(3) (closest rotation in Frobenius norm)."""
+    """Project a single 3x3 matrix onto SO(3) (closest rotation in Frobenius norm).
+
+    A non-finite matrix gives NaN, instead of an error that would stop the whole batch.
+    """
+    if not np.isfinite(np.sum(A)):
+        return np.full((3, 3), np.nan, dtype=np.float32)
     U, _, Vh = np.linalg.svd(A)
     T = U @ Vh
     if np.linalg.det(T) < 0:

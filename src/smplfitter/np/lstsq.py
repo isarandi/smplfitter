@@ -34,8 +34,7 @@ def lstsq(matrix, rhs, weights, l2_regularizer=None, l2_regularizer_reference=No
         regularized_gramian = np.sum(regularized_gramian, axis=0, keepdims=True)
         ATb = np.sum(ATb, axis=0, keepdims=True)
 
-    chol = np.linalg.cholesky(regularized_gramian)
-    return cholesky_solve(chol, ATb)
+    return _solve_each_or_nan(regularized_gramian, ATb)
 
 
 def lstsq_partial_share(
@@ -82,6 +81,26 @@ def lstsq_partial_share(
     coeff_indep2rhs = coeff_indep2rhs - coeff_indep2shared @ coeff_shared2rhs
     coeff_shared2rhs = np.repeat(coeff_shared2rhs, matrix.shape[0], axis=0)
     return np.concatenate([coeff_shared2rhs, coeff_indep2rhs], axis=1)
+
+
+def _solve_each_or_nan(gramian, rhs):
+    """Solves ``gramian @ x = rhs`` per batch element. An unsolvable element gives NaN.
+
+    One unsolvable element stops the batched calls, so only then the elements run one by one.
+    """
+    try:
+        return cholesky_solve(np.linalg.cholesky(gramian), rhs)
+    except (np.linalg.LinAlgError, ValueError):
+        pass
+
+    solutions = []
+    for gramian_element, rhs_element in zip(gramian, rhs):
+        try:
+            chol = np.linalg.cholesky(gramian_element[np.newaxis])
+            solutions.append(cholesky_solve(chol, rhs_element[np.newaxis])[0])
+        except (np.linalg.LinAlgError, ValueError):
+            solutions.append(np.full_like(rhs_element, np.nan))
+    return np.stack(solutions)
 
 
 def cholesky_solve(chol, rhs):

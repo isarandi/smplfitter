@@ -157,7 +157,9 @@ class CausalPoseSmoother:
     ) -> dict[str, np.ndarray]:
         """Adds the newest frame and returns its smoothed fit.
 
-        The values must be finite: NaN in the input of a fit raises an error in these backends.
+        Non-finite values in the points that a fit uses give NaN results, without an error, until
+        the frame has left the windows of the raw and of the smoothed frames: for up to twice the
+        window length.
 
         Parameters:
             vertices: Vertices of the frame (V, 3), in meters.

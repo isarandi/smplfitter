@@ -19,8 +19,34 @@ if TYPE_CHECKING:
     import smplfitter.tf
 
 
+def _nan_failed_elements(result: dict[str, tf.Tensor]) -> dict[str, tf.Tensor]:
+    """Gives NaN for all results of the elements that failed, so that none looks like a fit.
+
+    Non-finite input or a singular solve can leave some of the results of an element finite, for
+    example the rotations of the parts that the bad value did not reach. Every failure reaches
+    the translation or the orientations, so these two identify the failed elements.
+    """
+    failed = tf.logical_not(tf.reduce_all(tf.math.is_finite(result['trans']), axis=-1))
+    if 'orientations' in result:
+        finite = tf.reduce_all(tf.math.is_finite(result['orientations']), axis=[-3, -2, -1])
+        failed = tf.logical_or(failed, tf.logical_not(finite))
+    return {k: _with_nan_at(v, failed) for k, v in result.items() if v is not None}
+
+
+def _with_nan_at(values: tf.Tensor, failed: tf.Tensor) -> tf.Tensor:
+    mask = tf.reshape(failed, [-1] + [1] * (len(values.shape) - 1))
+    return tf.where(mask, tf.constant(float('nan'), values.dtype), values)
+
+
 class BodyFitter:
     """Fits body model parameters to target vertices and joints.
+
+    An element that fails, through non-finite input or a singular solve (for example when all its
+    weights are zero and a regularizer is zero), gives NaN in all its results. The other elements
+    of the batch are not affected, except with ``share_beta``, where all elements share the failed
+    shape and so all give NaN.
+
+    With ``allow_nan=False``, these NaN values are replaced by zeros, which hides the failure.
 
     Parameters:
         body_model: The SMPL model instance to fit.
@@ -336,6 +362,7 @@ class BodyFitter:
             requested_keys,
         )
 
+        output = _nan_failed_elements(output)
         if not allow_nan:
             return {k: safe_nan_to_zero(v) if v is not None else None for k, v in output.items()}
         return output
@@ -404,6 +431,7 @@ class BodyFitter:
             requested_keys,
         )
 
+        output = _nan_failed_elements(output)
         if not allow_nan:
             return {k: safe_nan_to_zero(v) if v is not None else None for k, v in output.items()}
         return output
@@ -525,6 +553,7 @@ class BodyFitter:
             requested_keys,
         )
 
+        output = _nan_failed_elements(output)
         if not allow_nan:
             return {k: safe_nan_to_zero(v) if v is not None else None for k, v in output.items()}
         return output
