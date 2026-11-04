@@ -6,6 +6,7 @@ Main submodules:
 - :mod:`smplfitter.tf` - TensorFlow backend
 - :mod:`smplfitter.jax` - JAX backend
 - :mod:`smplfitter.nb` - Numba backend
+- :mod:`smplfitter.smoothing` - Online smoothing of per-frame estimates
 """
 
 from __future__ import annotations

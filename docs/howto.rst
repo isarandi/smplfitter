@@ -167,6 +167,8 @@ fitting. For example, if your vertex estimates come with per-vertex uncertainty 
 a model like NLF, use the inverse uncertainty as the weight.
 
 
+.. _share-shape:
+
 Share Shape Across a Video Sequence
 -----------------------------------
 
@@ -190,6 +192,45 @@ while allowing pose to vary per frame:
 
 Sharing shape produces more consistent and accurate shape estimates, especially
 when individual frames have noisy or partial observations.
+
+
+Smooth a Live Stream
+--------------------
+
+Per-frame estimators such as Neural Localizer Fields (NLF) jitter over time, and their scale along
+the viewing ray is ambiguous. :class:`~smplfitter.smoothing.CausalPoseSmoother` turns one person's
+stream of vertices, joints and uncertainties into a smooth stream of body parameters. It is causal:
+each result uses only the current and the earlier frames, so it works on live input.
+
+.. code-block:: python
+
+   from smplfitter.nb import BodyModel
+   from smplfitter.smoothing import CausalPoseSmoother
+
+   smoother = CausalPoseSmoother(BodyModel('smpl', 'neutral', num_betas=10))
+
+   for frame in stream:
+       result = smoother.update(
+           frame.vertices,               # (6890, 3), in meters
+           frame.joints,                 # (24, 3), in meters
+           frame.vertex_uncertainties,   # (6890,)
+           frame.joint_uncertainties,    # (24,)
+       )
+       result['pose_rotvecs'], result['shape_betas'], result['trans']
+       result['vertices'], result['joints']
+
+- **Backends.** The smoother takes a body model from ``smplfitter.nb`` or ``smplfitter.np``. They
+  give the same results up to rounding. The Numba backend is about 13 times as fast: 13 ms against
+  170 ms per frame in a test with SMPL on a Ryzen 9 9950X3D.
+- **Camera.** The default camera center is the origin, which suits points in camera coordinates.
+  For world coordinates, pass ``camera_center`` to the constructor. For a moving camera, pass the
+  center of each frame to ``update``. The filters run on world coordinates, so a jerky camera does
+  not enter the smoothed motion.
+- **People and cuts.** Use one smoother per person, and call ``smoother.reset()`` at a shot change.
+- **Delay.** A causal filter lags behind fast motion, so jitter drops much more than the error. For
+  a complete video, a two-sided filter and :ref:`one shared shape <share-shape>` can give better
+  results.
+- **Frame rate.** The kernels suit frame rates below about 40 fps.
 
 
 Fit a Vertex Subset
