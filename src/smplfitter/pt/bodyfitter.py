@@ -849,16 +849,17 @@ class BodyFitter(nn.Module):
             # (see the class docstring).
             if scale_fit:
                 assert ref_scale_corr is not None
+                factor = ref_scale_corr[:, None, None]
                 glob_rotmats = self._fit_global_rotations_dependent(
                     target_vertices,
                     target_joints,
-                    ref_scale_corr * ref_verts + ref_trans.unsqueeze(-2),
-                    ref_scale_corr * ref_joints + ref_trans.unsqueeze(-2),
+                    factor * ref_verts + ref_trans.unsqueeze(-2),
+                    factor * ref_joints + ref_trans.unsqueeze(-2),
                     None,
                     None,
                     glob_rotmats,
                     shape_betas,
-                    ref_scale_corr,
+                    factor,
                     ref_trans,
                     kid_factor,
                     rotation_projection=rotation_projection,
@@ -1757,7 +1758,7 @@ def fit_scale_and_translation(
         # to make it unbiased, we could multiply by (1+2/(target_both.shape[1]))
         # but we are okay with the least squares solution
         scale_factor = torch.sqrt(ssq_target / ssq_reference)
-        trans = weighted_mean_target - scale_factor * weighted_mean_reference
+        trans = weighted_mean_target - scale_factor.unsqueeze(-1) * weighted_mean_reference
     else:
         scale_factor = None
         trans = weighted_mean_target - weighted_mean_reference

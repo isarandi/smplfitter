@@ -632,7 +632,7 @@ class BodyFitter:
                     None,
                     glob_rotmats,
                     shape_betas,
-                    ref_scale_corr,
+                    ref_scale_corr[:, None, None],
                     ref_trans,
                     kid_factor,
                 )
