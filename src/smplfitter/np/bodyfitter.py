@@ -251,9 +251,11 @@ class BodyFitter:
                 - **shape_betas** -- Estimated shape parameters (betas).
                 - **trans** -- Estimated translation, the ``trans`` of ``BM(pose, betas, trans)``.
                 - **joints** -- Joints of ``BM(pose, betas, trans)`` with the returned values
-                    (not scaled by ``scale_corr``), if requested.
+                    (not scaled by ``scale_corr``), if requested. Only the NumPy backend returns
+                    this key.
                 - **vertices** -- Vertices of ``BM(pose, betas, trans)`` with the returned values
-                    (not scaled by ``scale_corr``), if requested.
+                    (not scaled by ``scale_corr``), if requested. Only the NumPy backend returns
+                    this key.
                 - **orientations** -- Global body part orientations as rotation matrices.
                 - **relative_orientations** -- Parent-relative body part orientations as rotation \
                     matrices.

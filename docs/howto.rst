@@ -523,9 +523,16 @@ request only what you need:
        requested_keys=['pose_rotvecs', 'shape_betas', 'trans'],
    )
 
-Available keys: ``pose_rotvecs``, ``shape_betas``, ``trans``, ``vertices``,
-``joints``, ``orientations``, ``relative_orientations``, ``kid_factor``,
-``scale_corr``.
+Available keys: ``pose_rotvecs``, ``shape_betas``, ``trans``, ``orientations``,
+``relative_orientations``, ``kid_factor``, ``scale_corr``.
+
+Only the NumPy backend returns ``vertices`` and ``joints``. In the other backends, compute them
+with the body model:
+
+.. code-block:: python
+
+   output = body_model(result['pose_rotvecs'], result['shape_betas'], result['trans'])
+   output['vertices'], output['joints']
 
 
 Handle Failed Elements

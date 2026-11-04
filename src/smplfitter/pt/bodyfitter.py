@@ -22,6 +22,9 @@ class BodyFitter(nn.Module):
     of the batch are not affected, except with ``share_beta``, where all elements share the failed
     shape and so all give NaN.
 
+    The ``vertices`` and ``joints`` result keys are returned only by the NumPy backend. Here,
+    compute them with the body model.
+
     Parameters:
         body_model: The body model instance we wish to fit, of a certain SMPL model variant and \
             gender.

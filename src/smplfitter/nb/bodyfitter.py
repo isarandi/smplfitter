@@ -26,6 +26,9 @@ class BodyFitter:
     of the batch are not affected, except with ``share_beta``, where all elements share the failed
     shape and so all give NaN.
 
+    The ``vertices`` and ``joints`` result keys are returned only by the NumPy backend. Here,
+    compute them with the body model.
+
     Parameters:
         body_model: The body model instance to fit.
         enable_kid: Enables the use of a kid blendshape.
