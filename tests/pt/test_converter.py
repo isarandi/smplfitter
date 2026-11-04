@@ -1,8 +1,10 @@
 import numpy as np
+import pytest
 import torch
 from smplfitter.pt import BodyConverter, BodyModel
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='needs CUDA')
 def test_converter():
     body_model_in = BodyModel('smpl', 'neutral').cuda()
     body_model_out = BodyModel('smplx', 'neutral').cuda()

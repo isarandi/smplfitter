@@ -48,6 +48,7 @@ def test_body_model_call():
     assert output['vertices'].device == torch.device('cpu')
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='needs CUDA')
 def test_body_model_call_cuda():
     model = BodyModel('smpl', 'neutral').cuda()
     batch_size = 2

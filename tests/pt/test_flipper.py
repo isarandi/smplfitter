@@ -7,6 +7,7 @@ import torch
 from smplfitter.pt import BodyFlipper, BodyModel
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='needs CUDA')
 def test_flipper_smpl():
     body_model = BodyModel('smpl', 'neutral', num_betas=10).cuda()
     flipper = BodyFlipper(body_model).cuda()
@@ -41,6 +42,7 @@ def test_flipper_smpl():
 
 
 @pytest.mark.skipif('DATA_ROOT' not in os.environ, reason='DATA_ROOT not set')
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='needs CUDA')
 def test_flipper_smplx_amass():
     """Test flipper with real AMASS poses."""
     import h5py
