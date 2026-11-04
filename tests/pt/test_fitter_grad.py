@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import smplfitter.pt as smpl_pt
+from smplfitter.pt.lstsq import cholesky_solve_or_nan
 from smplfitter.pt.rotation import proj_SO3_with
 
 
@@ -136,3 +137,18 @@ def test_failed_element_keeps_the_gradient_of_the_others(projection):
     loss.backward()
     assert torch.isfinite(tv.grad[good]).all()
     assert tv.grad[good].abs().max() > 0
+
+
+def test_cholesky_solve_gives_nan_only_for_unsolvable_elements():
+    gramian = torch.tensor(
+        [
+            [[2.0, 0.5], [0.5, 1.0]],
+            [[1.0, 2.0], [2.0, 1.0]],  # indefinite: finite, but it has no factorization
+            [[float('nan'), 0.0], [0.0, 1.0]],
+            [[1.0, 0.0], [0.0, 1.0]],
+        ]
+    )
+    rhs = torch.ones(4, 2, 1)
+    solution = cholesky_solve_or_nan(gramian, rhs)
+    assert torch.isnan(solution[[1, 2]]).all()
+    assert torch.allclose(solution[[0, 3]], torch.linalg.solve(gramian[[0, 3]], rhs[[0, 3]]))

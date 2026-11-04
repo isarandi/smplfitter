@@ -823,6 +823,45 @@ def test_failed_element_is_nan_and_others_are_unaffected(fitter_backend: Backend
         np.testing.assert_allclose(values[good], alone[key], atol=2e-3, err_msg=key)
 
 
+@pytest.mark.parametrize('case', ['nan_vertex_weight', 'nan_joint_weight'])
+def test_failed_element_is_nan_also_where_the_failure_did_not_spread(
+    fitter_backend: Backend, case
+):
+    """With one iteration, a NaN weight reaches the solve but only some body part rotations."""
+    batch = _fit_bad_element_inputs(
+        fitter_backend, 'fit', _bad_element_inputs(case), num_iter=1, final_adjust_rots=False
+    )
+    for key, values in batch.items():
+        assert np.all(np.isnan(values[BAD_ELEMENT])), f'{key} of the failed element is not NaN'
+
+
+@pytest.mark.parametrize('method', BAD_ELEMENT_METHODS)
+@pytest.mark.parametrize('case', BAD_ELEMENT_CASES)
+def test_failed_element_in_pytorch_on_the_cpu(method, case):
+    """The CPU SVD raises an error on NaN, unlike the GPU one that the fixture uses."""
+    pytest.importorskip('torch')
+    backend = _pt_cpu_backend()
+    inputs = _bad_element_inputs(case)
+    good = [i for i in range(3) if i != BAD_ELEMENT]
+    batch = _fit_bad_element_inputs(backend, method, inputs)
+    alone = _fit_bad_element_inputs(backend, method, {k: v[good] for k, v in inputs.items()})
+    for key, values in batch.items():
+        assert np.all(np.isnan(values[BAD_ELEMENT])), f'{key} of the failed element is not NaN'
+        np.testing.assert_allclose(values[good], alone[key], atol=2e-3, err_msg=key)
+
+
+def _pt_cpu_backend() -> Backend:
+    import torch
+
+    from conftest import _make_pt_backend
+
+    backend = _make_pt_backend()
+    backend.to_tensor = torch.from_numpy
+    backend.prepare_model = lambda model: model
+    backend.prepare_fitter = lambda fitter: fitter
+    return backend
+
+
 @pytest.mark.parametrize('case', ['nan_vertex', 'nan_vertex_weight', 'zero_weights'])
 def test_failed_element_without_target_joints(fitter_backend: Backend, case):
     inputs = _bad_element_inputs(case)
@@ -899,7 +938,8 @@ def _fit_bad_element_inputs(backend: Backend, method: str, inputs: dict, **kwarg
     )
     with backend.context():
         if method == 'fit':
-            fit = fitter.fit(*targets, num_iter=2, requested_keys=['pose_rotvecs'], **kwargs)
+            kwargs = {'num_iter': 2, **kwargs}
+            fit = fitter.fit(*targets, requested_keys=['pose_rotvecs'], **kwargs)
         elif method == 'fit_with_known_pose':
             fit = fitter.fit_with_known_pose(
                 t(inputs['pose']), *targets, requested_keys=['shape_betas'], **kwargs

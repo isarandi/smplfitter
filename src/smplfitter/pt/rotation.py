@@ -111,9 +111,9 @@ def proj_SO3_analytic(A: torch.Tensor) -> torch.Tensor:
     R = U @ V.mT
 
     # Guard the fully degenerate A ~ 0 case -> identity. The comparison is also false for NaN,
-    # which must not turn into a valid rotation, so non-finite input gives NaN.
-    R = torch.where((fro > 1e-20).unsqueeze(-1).unsqueeze(-1), R, eye)
-    R = torch.where(torch.isfinite(fro).unsqueeze(-1).unsqueeze(-1), R, R.new_full((), math.nan))
+    # which must not turn into a valid rotation: the zero factor makes the identity NaN there.
+    fro = fro.unsqueeze(-1).unsqueeze(-1)
+    R = torch.where(fro > 1e-20, R, eye + 0.0 * fro)
     return R.to(orig_dtype)
 
 
@@ -124,16 +124,24 @@ def proj_SO3_svd(A: torch.Tensor) -> torch.Tensor:
     on the last singular vector when the naive product is a reflection.
 
     A non-finite matrix gives NaN. It would raise an error for the whole batch in the SVD
-    otherwise. The check is branch-free, so it adds no host-device synchronization.
+    otherwise.
     """
-    finite = torch.isfinite(A).all(dim=-1).all(dim=-1).unsqueeze(-1).unsqueeze(-1)
-    U, _, Vh = torch.linalg.svd(
-        torch.where(finite, A, torch.eye(3, dtype=A.dtype, device=A.device))
-    )
+    # The sum is non-finite if any entry is, and it takes fewer GPU operations than an entrywise
+    # check. The branch needs no care for CUDA graphs: the SVD synchronizes with the host anyway.
+    finite = torch.isfinite(A.sum(dim=(-2, -1))).unsqueeze(-1).unsqueeze(-1)
+    if bool(finite.all()):
+        return _proj_SO3_svd_finite(A)
+    eye = torch.eye(3, dtype=A.dtype, device=A.device)
+    rotations = _proj_SO3_svd_finite(torch.where(finite, A, eye))
+    return torch.where(finite, rotations, rotations.new_full((), math.nan))
+
+
+def _proj_SO3_svd_finite(A: torch.Tensor) -> torch.Tensor:
+    U, _, Vh = torch.linalg.svd(A)
     T = U @ Vh
     has_reflection = (torch.det(T) < 0).unsqueeze(-1).unsqueeze(-1)
     T_mirror = T - 2 * U[..., -1:] @ Vh[..., -1:, :]
-    return torch.where(finite, torch.where(has_reflection, T_mirror, T), T.new_full((), math.nan))
+    return torch.where(has_reflection, T_mirror, T)
 
 
 def _sym_eigvals3(M: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
